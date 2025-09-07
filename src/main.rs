@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::CommandFactory;
 use clap::Parser;
 
 mod cli;
@@ -36,7 +37,7 @@ fn main() -> Result<()> {
                 journal.create_entry(None, &content)?;
                 println!("Entry added successfully");
             } else {
-                cli::print_help();
+                Cli::command().print_help()?;
             }
         }
     }

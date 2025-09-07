@@ -81,16 +81,3 @@ pub fn handle_command(command: Commands, journal: &Journal) -> Result<()> {
 
     Ok(())
 }
-
-pub fn print_help() {
-    println!("Captain's Log - A terminal journaling application");
-    println!();
-    println!("Usage:");
-    println!("  cl \"Your journal entry\"     Create a new entry");
-    println!("  cl list                      List all entries");
-    println!("  cl show <id>                 Show specific entry");
-    println!("  cl search <query>            Search entries");
-    println!("  cl delete <id>               Delete entry");
-    println!();
-    println!("Use 'cl --help' for more options");
-}
