@@ -39,13 +39,13 @@ A terminal-based journaling application written in Rust that stores entries in S
 ## Technical Architecture
 
 ### Dependencies
-- `clap` - Command-line argument parsing
-- `rusqlite` - SQLite database interface
-- `chrono` - Date and time handling
-- `serde` - Serialization/deserialization
-- `crossterm` - Terminal manipulation
-- `tokio` (if async needed)
-- `directories` - User directory management
+- `clap` - Command-line argument parsing ✅ Implemented
+- `rusqlite` - SQLite database interface ✅ Implemented
+- `chrono` - Date and time handling ✅ Implemented
+- `serde` - Serialization/deserialization ✅ Implemented
+- `colored` - Terminal color formatting ✅ Implemented
+- `directories` - User directory management ✅ Implemented
+- `anyhow` - Error handling ✅ Implemented
 
 ### Project Structure
 ```
@@ -78,15 +78,17 @@ src/
 
 ## Command Interface
 
-### Basic Commands
-- `cl "Entry content"` - Quick entry creation
-- `cl --edit` or `cl -e` - Open editor for new entry
-- `cl --title "My Title" "Entry content"` - Entry with title
-- `cl list` - List all entries
-- `cl show <id>` - Show specific entry
-- `cl calendar` - Calendar view
-- `cl search <query>` - Search entries
-- `cl delete <id>` - Delete entry
+### Basic Commands ✅ Implemented
+- `cl "Entry content"` - Quick entry creation ✅
+- `cl list` - List all entries ✅
+- `cl list --date 2025-01-01` - List entries from specific date ✅
+- `cl list --since 2025-01-01 --until 2025-12-31` - Date range filtering ✅
+- `cl show <id>` - Show specific entry ✅
+- `cl edit <id>` - Edit entry in external editor ✅
+- `cl calendar` - Calendar view ✅
+- `cl calendar --year 2024 --month 12` - Calendar for specific month ✅
+- `cl search <query>` - Search entries ✅
+- `cl delete <id>` - Delete entry ✅
 
 ### Advanced Commands
 - `cl --date "2024-01-15" "Entry content"` - Entry with specific date
@@ -151,19 +153,24 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(content, title);
 3. ✅ Text entry creation and retrieval
 4. ✅ Basic listing and search
 
-**Current Status**: Phase 1 is fully implemented and tested. The application supports:
-- Quick entry creation: `cl "Your journal entry"`
-- Entry listing: `cl list`
-- Entry viewing: `cl show <id>`
-- Entry searching: `cl search <query>`
-- Entry deletion: `cl delete <id>`
-- Database stored in `~/.local/share/captains-log/journal.db`
+### Phase 2: Enhanced Interface ✅ COMPLETED
+1. ✅ Calendar view implementation
+2. ✅ Rich terminal formatting with colors
+3. ✅ External editor integration (respects $EDITOR env var)
+4. ✅ Date filtering and queries (--date, --since, --until)
+5. ✅ Entry editing functionality
 
-### Phase 2: Enhanced Interface
-1. Calendar view implementation
-2. Rich terminal formatting
-3. External editor integration
-4. Date filtering and queries
+**Current Status**: Phase 2 is fully implemented and tested. The application now supports:
+- Quick entry creation: `cl "Your journal entry"`
+- Entry listing: `cl list` (with optional date filtering)
+- Entry viewing: `cl show <id>` (with enhanced formatting)
+- Entry searching: `cl search <query>` (with enhanced formatting)
+- Entry deletion: `cl delete <id>`
+- Entry editing: `cl edit <id>` (opens external editor)
+- Calendar view: `cl calendar` (shows entries by date)
+- Date-based filtering: `cl list --since 2025-01-01 --until 2025-12-31`
+- Rich terminal colors and improved visual hierarchy
+- Database stored in `~/.local/share/captains-log/journal.db`
 
 ### Phase 3: Multimedia Support
 1. Audio file attachment and playback

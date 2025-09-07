@@ -4,7 +4,8 @@
 A terminal-based journaling application written in Rust with SQLite storage.
 
 ## Current Status
-✅ **Phase 1 Complete** - Core functionality implemented and tested
+✅ **Phase 1 Complete** - Core functionality implemented and tested  
+✅ **Phase 2 Complete** - Advanced features implemented and tested
 
 ## Build & Test Commands
 
@@ -29,6 +30,18 @@ cargo build
 
 # Delete entry  
 ./target/debug/cl delete <id>
+
+# Edit entry (opens external editor)
+./target/debug/cl edit <id>
+
+# List entries with date filtering
+./target/debug/cl list --since 2025-01-01
+./target/debug/cl list --until 2025-12-31
+./target/debug/cl list --date 2025-09-09
+
+# Calendar view
+./target/debug/cl calendar
+./target/debug/cl calendar --year 2024 --month 12
 
 # Show help
 ./target/debug/cl --help
@@ -64,6 +77,8 @@ src/
 - Automatic migrations on first run
 
 ## Features Implemented
+
+### Phase 1 - Core Features
 - [x] Quick entry creation from command line
 - [x] Entry listing with timestamps
 - [x] Individual entry viewing
@@ -71,17 +86,34 @@ src/
 - [x] Entry deletion
 - [x] SQLite storage with proper schema
 
-## Next Phase Features
-- [ ] Calendar view for entries by date
-- [ ] External editor integration (Neovim)
-- [ ] Rich terminal formatting
-- [ ] Date-based filtering
-- [ ] Entry editing capabilities
+### Phase 2 - Advanced Features
+- [x] Calendar view for entries by date
+- [x] External editor integration (respects $EDITOR environment variable, defaults to nvim)
+- [x] Rich terminal formatting with colors and improved layout
+- [x] Date-based filtering (--date, --since, --until options for list command)
+- [x] Entry editing capabilities
+
+## Future Enhancement Ideas
+- [ ] Tagging system for entries
+- [ ] Export functionality (markdown, JSON)
+- [ ] Import from other journal formats
+- [ ] Full-text search improvements
+- [ ] Attachment support (images, files)
 
 ## Testing Notes
-All basic functionality has been manually tested:
+All functionality has been manually tested:
+
+### Phase 1 Testing
 1. Entry creation works correctly
 2. Database persistence confirmed
 3. Search functionality operational
 4. List and show commands working
 5. CLI help system functional
+
+### Phase 2 Testing
+1. Calendar view displays correctly with entry indicators
+2. Date filtering (--date, --since, --until) works properly
+3. External editor integration functional (uses $EDITOR or defaults to nvim)
+4. Entry editing updates database correctly
+5. Rich terminal formatting enhances user experience
+6. All new commands properly documented in help system

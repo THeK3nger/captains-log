@@ -108,9 +108,9 @@ impl Journal {
              FROM entries WHERE id = ?1",
         )?;
 
-        let entry_iter = stmt.query_map([id], |row| Entry::from_row(row))?;
+        let mut entry_iter = stmt.query_map([id], Entry::from_row)?;
 
-        for entry in entry_iter {
+        if let Some(entry) = entry_iter.next() {
             return Ok(Some(entry?));
         }
 
@@ -126,7 +126,7 @@ impl Journal {
              FROM entries ORDER BY created_at DESC",
         )?;
 
-        let entry_iter = stmt.query_map([], |row| Entry::from_row(row))?;
+        let entry_iter = stmt.query_map([], Entry::from_row)?;
 
         let mut entries = Vec::new();
         for entry in entry_iter {
@@ -148,7 +148,7 @@ impl Journal {
              ORDER BY created_at DESC",
         )?;
 
-        let entry_iter = stmt.query_map([&search_pattern], |row| Entry::from_row(row))?;
+        let entry_iter = stmt.query_map([&search_pattern], Entry::from_row)?;
 
         let mut entries = Vec::new();
         for entry in entry_iter {
@@ -176,5 +176,78 @@ impl Journal {
         )?;
 
         Ok(rows_affected > 0)
+    }
+
+    pub fn list_entries_filtered(
+        &self,
+        date: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+    ) -> Result<Vec<Entry>> {
+        let conn = self.db.connection();
+        let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, created_at, updated_at FROM entries".to_string();
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(date_str) = date {
+            let date = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                .map_err(|_| anyhow::anyhow!("Invalid date format. Use YYYY-MM-DD"))?;
+            conditions.push("DATE(timestamp) = ?");
+            params.push(Box::new(date.to_string()));
+        }
+
+        if let Some(since_str) = since {
+            let since_date = chrono::NaiveDate::parse_from_str(since_str, "%Y-%m-%d")
+                .map_err(|_| anyhow::anyhow!("Invalid since date format. Use YYYY-MM-DD"))?;
+            conditions.push("DATE(timestamp) >= ?");
+            params.push(Box::new(since_date.to_string()));
+        }
+
+        if let Some(until_str) = until {
+            let until_date = chrono::NaiveDate::parse_from_str(until_str, "%Y-%m-%d")
+                .map_err(|_| anyhow::anyhow!("Invalid until date format. Use YYYY-MM-DD"))?;
+            conditions.push("DATE(timestamp) <= ?");
+            params.push(Box::new(until_date.to_string()));
+        }
+
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
+
+        query.push_str(" ORDER BY created_at DESC");
+
+        let mut stmt = conn.prepare(&query)?;
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let entry_iter = stmt.query_map(param_refs.as_slice(), Entry::from_row)?;
+
+        let mut entries = Vec::new();
+        for entry in entry_iter {
+            entries.push(entry?);
+        }
+
+        Ok(entries)
+    }
+
+    pub fn list_entries_for_month(&self, year: i32, month: u32) -> Result<Vec<Entry>> {
+        let conn = self.db.connection();
+
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, title, content, audio_path, image_paths,
+                    created_at, updated_at
+             FROM entries
+             WHERE strftime('%Y', timestamp) = ?1 AND strftime('%m', timestamp) = ?2
+             ORDER BY timestamp ASC",
+        )?;
+
+        let month_str = format!("{:02}", month);
+        let entry_iter = stmt.query_map([year.to_string(), month_str], Entry::from_row)?;
+
+        let mut entries = Vec::new();
+        for entry in entry_iter {
+            entries.push(entry?);
+        }
+
+        Ok(entries)
     }
 }

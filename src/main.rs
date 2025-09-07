@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
+use colored::*;
 
 mod cli;
 mod database;
@@ -34,8 +35,8 @@ fn main() -> Result<()> {
         }
         None => {
             if let Some(content) = cli.content {
-                journal.create_entry(None, &content)?;
-                println!("Entry added successfully");
+                let id = journal.create_entry(None, &content)?;
+                println!("{}", format!("Entry {} added successfully", id).green());
             } else {
                 Cli::command().print_help()?;
             }

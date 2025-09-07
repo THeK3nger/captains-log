@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
-use rusqlite::{Connection, Result as SqlResult};
+use rusqlite::Connection;
 use std::fs;
 use std::path::PathBuf;
 
