@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::database::Database;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -34,6 +36,44 @@ impl Entry {
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
+    }
+
+    pub fn get_summary(&self, summary_size: usize) -> String {
+        let content_preview = if self.content.len() > summary_size {
+            format!("{}...", &self.content[..summary_size])
+        } else {
+            self.content.clone()
+        };
+        let title = self.title.as_deref();
+        if title.is_some() {
+            format!(
+                "[{}] {} - {} - {}",
+                self.id,
+                self.timestamp.format("%Y-%m-%d %H:%M"),
+                title.unwrap(),
+                content_preview
+            )
+        } else {
+            format!(
+                "[{}] {} - {}",
+                self.id,
+                self.timestamp.format("%Y-%m-%d %H:%M"),
+                content_preview
+            )
+        }
+    }
+}
+
+impl fmt::Display for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] {} - {}\n{}\n",
+            self.id,
+            self.timestamp.format("%Y-%m-%d %H:%M"),
+            self.title.as_deref().unwrap_or("Untitled"),
+            self.content
+        )
     }
 }
 

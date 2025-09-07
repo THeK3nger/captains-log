@@ -34,12 +34,7 @@ pub fn handle_command(command: Commands, journal: &Journal) -> Result<()> {
                 println!("No entries found");
             } else {
                 for entry in entries {
-                    println!(
-                        "[{}] {} - {}",
-                        entry.id,
-                        entry.created_at.format("%Y-%m-%d %H:%M"),
-                        entry.title.as_deref().unwrap_or("Untitled")
-                    );
+                    println!("{}", entry.get_summary(40));
                 }
             }
         }
