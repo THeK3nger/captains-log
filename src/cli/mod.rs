@@ -1,8 +1,11 @@
+pub mod formatting;
+
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use clap::Subcommand;
 use colored::*;
+use formatting::render_markdown;
 use std::env;
 use std::fs;
 use std::process::Command;
@@ -151,7 +154,7 @@ fn print_entry(entry: &Entry) {
     }
     println!("{}", "─".repeat(60).bright_blue());
     println!();
-    println!("{}", entry.content);
+    println!("{}", render_markdown(&entry.content));
     println!();
     println!("{}", "─".repeat(60).bright_blue());
 }
@@ -189,7 +192,7 @@ fn edit_entry(journal: &Journal, id: i64) -> Result<()> {
 
     // Write current content to temp file
     let current_content = format!(
-        "{}\n\n{}",
+        "# {}\n\n{}",
         entry.title.as_deref().unwrap_or(""),
         entry.content
     );
@@ -221,7 +224,10 @@ fn edit_entry(journal: &Journal, id: i64) -> Result<()> {
         let title = if lines[0].trim().is_empty() {
             None
         } else {
-            Some(lines[0].trim())
+            let mut title = lines[0].trim();
+            // Remove leading '#' if present
+            title = title.strip_prefix('#').unwrap_or(title);
+            Some(title.trim())
         };
         let content = lines[1..].join("\n").trim().to_string();
         (title, content)
