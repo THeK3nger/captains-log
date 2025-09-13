@@ -55,7 +55,8 @@ pub fn render_markdown(content: &str) -> String {
                     result.push('\n');
                 }
                 Tag::Link { dest_url, .. } => {
-                    result.push_str("[");
+                    result.push('[');
+                    result.push_str(&hyperlink_start(&dest_url));
                 }
                 _ => {}
             },
@@ -96,7 +97,8 @@ pub fn render_markdown(content: &str) -> String {
                     result.push_str("\n\n");
                 }
                 TagEnd::Link => {
-                    result.push_str("]");
+                    result.push_str(hyperlink_end());
+                    result.push(']');
                 }
                 _ => {}
             },
@@ -140,5 +142,37 @@ pub fn render_markdown(content: &str) -> String {
             _ => { /* Ignore other events for simplicity */ }
         }
     }
-    return result;
+    result
+}
+
+// OSC 8 (hyperlink) escape sequences.
+// Format: OSC 8 ; ; <URL> ST <TEXT> OSC 8 ; ; ST
+// We use ST = ESC \ (can also be BEL \x07, but ESC \ is broadly supported).
+// Because this parser is sequential, I need to build the full link using this schema
+//
+// `\x1b]8;;<URL>\x1b\\<TEXT>\x1b]8;;\x1b\\`
+//
+// The first part is created by `build_link_start`. Then, the text is added
+// "automatically" as a `Event::Text`. Finally, the link is closed with
+// `HYPERLINK_END`.
+
+const OSC8_LINK_PREFIX: &str = "\x1b]8;;";
+const ST: &str = "\x1b\\";
+const OSC8_LINK_END: &str = "\x1b]8;;\x1b\\";
+
+#[inline]
+fn hyperlink_start(link_url: &str) -> String {
+    // URL must not contain ESC or BEL per OSC 8 requirements
+    debug_assert!(!link_url.contains('\x1b') && !link_url.contains('\x07'));
+
+    let mut s = String::with_capacity(OSC8_LINK_PREFIX.len() + link_url.len() + ST.len());
+    s.push_str(OSC8_LINK_PREFIX);
+    s.push_str(link_url);
+    s.push_str(ST);
+    s
+}
+
+#[inline]
+fn hyperlink_end() -> &'static str {
+    OSC8_LINK_END
 }
