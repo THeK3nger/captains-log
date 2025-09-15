@@ -4,9 +4,10 @@
 A terminal-based journaling application written in Rust with SQLite storage.
 
 ## Current Status
-✅ **Phase 1 Complete** - Core functionality implemented and tested  
-✅ **Phase 2 Complete** - Advanced features implemented and tested  
+✅ **Phase 1 Complete** - Core functionality implemented and tested
+✅ **Phase 2 Complete** - Advanced features implemented and tested
 ✅ **Configuration System** - Global configuration file support added
+✅ **Journal Categories** - Support for organizing entries by journal type
 
 ## Build & Test Commands
 
@@ -20,8 +21,16 @@ cargo build
 # Quick entry creation
 ./target/debug/cl "Your journal entry content"
 
+# Quick entry creation with journal category
+./target/debug/cl "Your journal entry content" --journal Work
+./target/debug/cl "Personal note" --journal Personal
+
 # List all entries
 ./target/debug/cl list
+
+# List entries by journal category
+./target/debug/cl list --journal Work
+./target/debug/cl list --journal Personal
 
 # Show specific entry
 ./target/debug/cl show <id>
@@ -39,6 +48,10 @@ cargo build
 ./target/debug/cl list --since 2025-01-01
 ./target/debug/cl list --until 2025-12-31
 ./target/debug/cl list --date 2025-09-09
+
+# Combine filters (date and journal)
+./target/debug/cl list --journal Work --since 2025-01-01
+./target/debug/cl list --journal Personal --date 2025-09-09
 
 # Calendar view
 ./target/debug/cl calendar
@@ -81,10 +94,11 @@ src/
 ```
 
 ## Database
-- Default Location: `~/.local/share/captains-log/journal.db`  
+- Default Location: `~/.local/share/captains-log/journal.db`
 - Configurable via `database.path` setting
-- Schema: entries table with id, timestamp, title, content, audio_path, image_paths, created_at, updated_at
+- Schema: entries table with id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at
 - Automatic migrations on first run
+- Journal field defaults to "Personal" for backward compatibility
 
 ## Configuration
 - Location: `~/.config/captains-log/config.json` (Linux/macOS) or `%APPDATA%\captains-log\config.json` (Windows)
@@ -121,6 +135,14 @@ src/
 - [x] Display settings (colors, date format, pagination)
 - [x] Configuration management commands (show, set, path)
 
+### Journal Categories
+- [x] Support for organizing entries by journal type (Personal, Work, etc.)
+- [x] Journal field added to database schema with "Personal" default
+- [x] --journal parameter for quick entry creation
+- [x] --journal filter for list command
+- [x] Journal type displayed in entry summaries and detailed views
+- [x] Backward compatibility with existing entries
+
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
 - [ ] Export functionality (markdown, JSON)
@@ -155,3 +177,12 @@ All functionality has been manually tested:
 6. Display settings (colors, date format, pagination) operational
 7. Error handling for invalid configuration keys
 8. Configuration persistence across application restarts
+
+### Journal Categories Testing
+1. Journal field added to database schema with automatic migration
+2. Default journal value "Personal" applied to new and existing entries
+3. Quick entry creation with --journal parameter working
+4. List command filtering by journal category functional
+5. Journal type displayed in both summary and detailed entry views
+6. Combined filtering (date + journal) operational
+7. Backward compatibility maintained for existing entries
