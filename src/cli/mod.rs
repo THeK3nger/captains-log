@@ -26,6 +26,10 @@ pub enum Commands {
         /// Show entries until date (YYYY-MM-DD)
         #[arg(long)]
         until: Option<String>,
+
+        /// Filter by journal category
+        #[arg(long)]
+        journal: Option<String>,
     },
 
     /// Show a specific entry by ID
@@ -85,18 +89,32 @@ pub enum ConfigAction {
     Path,
 }
 
-pub fn handle_command(command: Commands, journal: &Journal, config: &Config) -> Result<()> {
+pub fn handle_command(
+    command: Commands,
+    journal: &Journal,
+    config: &Config,
+    global_journal: Option<&str>,
+) -> Result<()> {
     match command {
-        Commands::List { date, since, until } => {
-            let entries = if date.is_some() || since.is_some() || until.is_some() {
-                journal.list_entries_filtered(
-                    date.as_deref(),
-                    since.as_deref(),
-                    until.as_deref(),
-                )?
-            } else {
-                journal.list_entries()?
-            };
+        Commands::List {
+            date,
+            since,
+            until,
+            journal: list_journal,
+        } => {
+            let journal_filter = list_journal.as_deref().or(global_journal);
+            let entries =
+                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
+                {
+                    journal.list_entries_filtered(
+                        date.as_deref(),
+                        since.as_deref(),
+                        until.as_deref(),
+                        journal_filter,
+                    )?
+                } else {
+                    journal.list_entries()?
+                };
 
             if entries.is_empty() {
                 println!("{}", "No entries found".yellow());
@@ -163,7 +181,7 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
         Some(ConfigAction::Show) | None => {
             println!("{}", "Current Configuration:".cyan().bold());
             println!("{}", "─".repeat(40).bright_blue());
-            
+
             println!();
             println!("{}", "Database:".yellow().bold());
             if let Some(path) = &config.database.path {
@@ -171,28 +189,37 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
             } else {
                 println!("  path: {} (default)", "auto".bright_black());
             }
-            
+
             println!();
             println!("{}", "Editor:".yellow().bold());
             if let Some(command) = &config.editor.command {
                 println!("  command: {}", command.green());
             } else {
-                println!("  command: {} (from $EDITOR or default)", "auto".bright_black());
+                println!(
+                    "  command: {} (from $EDITOR or default)",
+                    "auto".bright_black()
+                );
             }
-            
+
             println!();
             println!("{}", "Display:".yellow().bold());
-            println!("  colors_enabled: {}", config.display.colors_enabled.to_string().green());
+            println!(
+                "  colors_enabled: {}",
+                config.display.colors_enabled.to_string().green()
+            );
             println!("  date_format: {}", config.display.date_format.green());
             if let Some(entries_per_page) = config.display.entries_per_page {
-                println!("  entries_per_page: {}", entries_per_page.to_string().green());
+                println!(
+                    "  entries_per_page: {}",
+                    entries_per_page.to_string().green()
+                );
             } else {
                 println!("  entries_per_page: {} (no limit)", "auto".bright_black());
             }
         }
         Some(ConfigAction::Set { key, value }) => {
             let mut new_config = config.clone();
-            
+
             match key.as_str() {
                 "database.path" => {
                     new_config.database.path = Some(value.clone());
@@ -203,24 +230,38 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                     println!("{}", format!("Set editor.command to '{}'", value).green());
                 }
                 "display.colors_enabled" => {
-                    let enabled: bool = value.parse()
+                    let enabled: bool = value
+                        .parse()
                         .context("display.colors_enabled must be 'true' or 'false'")?;
                     new_config.display.colors_enabled = enabled;
-                    println!("{}", format!("Set display.colors_enabled to {}", enabled).green());
+                    println!(
+                        "{}",
+                        format!("Set display.colors_enabled to {}", enabled).green()
+                    );
                 }
                 "display.date_format" => {
                     new_config.display.date_format = value.clone();
-                    println!("{}", format!("Set display.date_format to '{}'", value).green());
+                    println!(
+                        "{}",
+                        format!("Set display.date_format to '{}'", value).green()
+                    );
                 }
                 "display.entries_per_page" => {
                     if value == "auto" || value == "none" {
                         new_config.display.entries_per_page = None;
-                        println!("{}", "Set display.entries_per_page to auto (no limit)".green());
+                        println!(
+                            "{}",
+                            "Set display.entries_per_page to auto (no limit)".green()
+                        );
                     } else {
-                        let per_page: usize = value.parse()
+                        let per_page: usize = value
+                            .parse()
                             .context("display.entries_per_page must be a number or 'auto'")?;
                         new_config.display.entries_per_page = Some(per_page);
-                        println!("{}", format!("Set display.entries_per_page to {}", per_page).green());
+                        println!(
+                            "{}",
+                            format!("Set display.entries_per_page to {}", per_page).green()
+                        );
                     }
                 }
                 _ => {
@@ -230,16 +271,19 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                     ));
                 }
             }
-            
+
             new_config.save()?;
-            println!("{}", "Configuration saved successfully".bright_green().bold());
+            println!(
+                "{}",
+                "Configuration saved successfully".bright_green().bold()
+            );
         }
         Some(ConfigAction::Path) => {
             let config_path = Config::get_config_path()?;
             println!("{}", config_path.display());
         }
     }
-    
+
     Ok(())
 }
 
@@ -258,6 +302,11 @@ fn print_entry(entry: &Entry) {
             .format("%Y-%m-%d %H:%M:%S")
             .to_string()
             .white()
+    );
+    println!(
+        "{}: {}",
+        "Journal".cyan().bold(),
+        entry.journal.magenta().bold()
     );
     if let Some(title) = &entry.title {
         println!("{}: {}", "Title".cyan().bold(), title.green().bold());
@@ -278,17 +327,19 @@ fn format_entry_summary(entry: &Entry) -> String {
 
     let id = format!("[{}]", entry.id).bright_blue().bold();
     let date = entry.timestamp.format("%Y-%m-%d %H:%M").to_string().white();
+    let journal = format!("[{}]", entry.journal).magenta().bold();
 
     if let Some(title) = &entry.title {
         format!(
-            "{} {} - {} - {}",
+            "{} {} {} - {} - {}",
             id,
             date,
+            journal,
             title.green().bold(),
             content_preview.normal()
         )
     } else {
-        format!("{} {} - {}", id, date, content_preview.normal())
+        format!("{} {} {} - {}", id, date, journal, content_preview.normal())
     }
 }
 

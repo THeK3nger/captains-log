@@ -14,6 +14,7 @@ pub struct Entry {
     pub content: String,
     pub audio_path: Option<String>,
     pub image_paths: Vec<String>,
+    pub journal: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -33,6 +34,9 @@ impl Entry {
             content: row.get("content")?,
             audio_path: row.get("audio_path")?,
             image_paths,
+            journal: row
+                .get("journal")
+                .unwrap_or_else(|_| "Personal".to_string()),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -47,17 +51,19 @@ impl Entry {
         let title = self.title.as_deref();
         if title.is_some() {
             format!(
-                "[{}] {} - {} - {}",
+                "[{}] {} [{}] - {} - {}",
                 self.id,
                 self.timestamp.format("%Y-%m-%d %H:%M"),
+                self.journal,
                 title.unwrap(),
                 content_preview
             )
         } else {
             format!(
-                "[{}] {} - {}",
+                "[{}] {} [{}] - {}",
                 self.id,
                 self.timestamp.format("%Y-%m-%d %H:%M"),
+                self.journal,
                 content_preview
             )
         }
@@ -68,9 +74,10 @@ impl fmt::Display for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "[{}] {} - {}\n{}\n",
+            "[{}] {} [{}] - {}\n{}\n",
             self.id,
             self.timestamp.format("%Y-%m-%d %H:%M"),
+            self.journal,
             self.title.as_deref().unwrap_or("Untitled"),
             self.content
         )
@@ -86,14 +93,20 @@ impl Journal {
         Journal { db }
     }
 
-    pub fn create_entry(&self, title: Option<&str>, content: &str) -> Result<i64> {
+    pub fn create_entry(
+        &self,
+        title: Option<&str>,
+        content: &str,
+        journal: Option<&str>,
+    ) -> Result<i64> {
         let conn = self.db.connection();
         let now = Utc::now();
+        let journal_name = journal.unwrap_or("Personal");
 
         conn.execute(
-            "INSERT INTO entries (timestamp, title, content, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![now, title, content, now, now],
+            "INSERT INTO entries (timestamp, title, content, journal, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![now, title, content, journal_name, now, now],
         )?;
 
         Ok(conn.last_insert_rowid())
@@ -104,7 +117,7 @@ impl Journal {
 
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    created_at, updated_at
+                    journal, created_at, updated_at
              FROM entries WHERE id = ?1",
         )?;
 
@@ -122,7 +135,7 @@ impl Journal {
 
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    created_at, updated_at
+                    journal, created_at, updated_at
              FROM entries ORDER BY created_at DESC",
         )?;
 
@@ -142,7 +155,7 @@ impl Journal {
 
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    created_at, updated_at
+                    journal, created_at, updated_at
              FROM entries
              WHERE content LIKE ?1 OR title LIKE ?1
              ORDER BY created_at DESC",
@@ -183,9 +196,10 @@ impl Journal {
         date: Option<&str>,
         since: Option<&str>,
         until: Option<&str>,
+        journal: Option<&str>,
     ) -> Result<Vec<Entry>> {
         let conn = self.db.connection();
-        let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, created_at, updated_at FROM entries".to_string();
+        let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries".to_string();
         let mut conditions = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -208,6 +222,11 @@ impl Journal {
                 .map_err(|_| anyhow::anyhow!("Invalid until date format. Use YYYY-MM-DD"))?;
             conditions.push("DATE(timestamp) <= ?");
             params.push(Box::new(until_date.to_string()));
+        }
+
+        if let Some(journal_str) = journal {
+            conditions.push("journal = ?");
+            params.push(Box::new(journal_str.to_string()));
         }
 
         if !conditions.is_empty() {
@@ -234,7 +253,7 @@ impl Journal {
 
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    created_at, updated_at
+                    journal, created_at, updated_at
              FROM entries
              WHERE strftime('%Y', timestamp) = ?1 AND strftime('%m', timestamp) = ?2
              ORDER BY timestamp ASC",

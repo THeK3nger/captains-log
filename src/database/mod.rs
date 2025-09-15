@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use crate::config::Config;
+use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::fs;
 
@@ -25,7 +25,6 @@ impl Database {
         Ok(db)
     }
 
-
     fn run_migrations(&mut self) -> Result<()> {
         // Create entries table
         self.conn.execute(
@@ -36,6 +35,7 @@ impl Database {
                 content TEXT NOT NULL,
                 audio_path TEXT,
                 image_paths TEXT,
+                journal TEXT DEFAULT 'Personal',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",

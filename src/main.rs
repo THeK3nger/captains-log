@@ -23,22 +23,26 @@ struct Cli {
 
     /// Quick entry content (when no subcommand is provided)
     content: Option<String>,
+
+    /// Journal category for quick entries
+    #[arg(long, global = true)]
+    journal: Option<String>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     let config = Config::load()?;
     let db = Database::new(&config)?;
     let journal = Journal::new(db);
 
     match cli.command {
         Some(command) => {
-            cli::handle_command(command, &journal, &config)?;
+            cli::handle_command(command, &journal, &config, cli.journal.as_deref())?;
         }
         None => {
             if let Some(content) = cli.content {
-                let id = journal.create_entry(None, &content)?;
+                let id = journal.create_entry(None, &content, cli.journal.as_deref())?;
                 println!("{}", format!("Entry {} added successfully", id).green());
             } else {
                 Cli::command().print_help()?;
