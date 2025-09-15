@@ -1,16 +1,15 @@
 use anyhow::{Context, Result};
-use directories::ProjectDirs;
+use crate::config::Config;
 use rusqlite::Connection;
 use std::fs;
-use std::path::PathBuf;
 
 pub struct Database {
     conn: Connection,
 }
 
 impl Database {
-    pub fn new() -> Result<Self> {
-        let db_path = Self::get_database_path()?;
+    pub fn new(config: &Config) -> Result<Self> {
+        let db_path = config.get_database_path()?;
 
         // Create directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
@@ -26,12 +25,6 @@ impl Database {
         Ok(db)
     }
 
-    fn get_database_path() -> Result<PathBuf> {
-        let proj_dirs = ProjectDirs::from("", "", "captains-log")
-            .context("Failed to get project directories")?;
-
-        Ok(proj_dirs.data_dir().join("journal.db"))
-    }
 
     fn run_migrations(&mut self) -> Result<()> {
         // Create entries table

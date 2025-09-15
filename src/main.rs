@@ -4,10 +4,12 @@ use clap::Parser;
 use colored::*;
 
 mod cli;
+mod config;
 mod database;
 mod journal;
 
 use cli::Commands;
+use config::Config;
 use database::Database;
 use journal::Journal;
 
@@ -25,13 +27,14 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-
-    let db = Database::new()?;
+    
+    let config = Config::load()?;
+    let db = Database::new(&config)?;
     let journal = Journal::new(db);
 
     match cli.command {
         Some(command) => {
-            cli::handle_command(command, &journal)?;
+            cli::handle_command(command, &journal, &config)?;
         }
         None => {
             if let Some(content) = cli.content {

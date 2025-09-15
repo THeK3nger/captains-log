@@ -1,5 +1,6 @@
 pub mod formatting;
 
+use crate::config::Config;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
@@ -61,9 +62,30 @@ pub enum Commands {
         #[arg(long)]
         month: Option<u32>,
     },
+
+    /// Manage configuration
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
 }
 
-pub fn handle_command(command: Commands, journal: &Journal) -> Result<()> {
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Show current configuration
+    Show,
+    /// Set a configuration value
+    Set {
+        /// Configuration key (e.g., editor.command, database.path)
+        key: String,
+        /// Configuration value
+        value: String,
+    },
+    /// Show configuration file path
+    Path,
+}
+
+pub fn handle_command(command: Commands, journal: &Journal, config: &Config) -> Result<()> {
     match command {
         Commands::List { date, since, until } => {
             let entries = if date.is_some() || since.is_some() || until.is_some() {
@@ -123,13 +145,101 @@ pub fn handle_command(command: Commands, journal: &Journal) -> Result<()> {
             }
         }
         Commands::Edit { id } => {
-            edit_entry(journal, id)?;
+            edit_entry(journal, id, config)?;
         }
         Commands::Calendar { year, month } => {
             show_calendar(journal, year, month)?;
         }
+        Commands::Config { action } => {
+            handle_config_command(action, config)?;
+        }
     }
 
+    Ok(())
+}
+
+fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Result<()> {
+    match action {
+        Some(ConfigAction::Show) | None => {
+            println!("{}", "Current Configuration:".cyan().bold());
+            println!("{}", "─".repeat(40).bright_blue());
+            
+            println!();
+            println!("{}", "Database:".yellow().bold());
+            if let Some(path) = &config.database.path {
+                println!("  path: {}", path.green());
+            } else {
+                println!("  path: {} (default)", "auto".bright_black());
+            }
+            
+            println!();
+            println!("{}", "Editor:".yellow().bold());
+            if let Some(command) = &config.editor.command {
+                println!("  command: {}", command.green());
+            } else {
+                println!("  command: {} (from $EDITOR or default)", "auto".bright_black());
+            }
+            
+            println!();
+            println!("{}", "Display:".yellow().bold());
+            println!("  colors_enabled: {}", config.display.colors_enabled.to_string().green());
+            println!("  date_format: {}", config.display.date_format.green());
+            if let Some(entries_per_page) = config.display.entries_per_page {
+                println!("  entries_per_page: {}", entries_per_page.to_string().green());
+            } else {
+                println!("  entries_per_page: {} (no limit)", "auto".bright_black());
+            }
+        }
+        Some(ConfigAction::Set { key, value }) => {
+            let mut new_config = config.clone();
+            
+            match key.as_str() {
+                "database.path" => {
+                    new_config.database.path = Some(value.clone());
+                    println!("{}", format!("Set database.path to '{}'", value).green());
+                }
+                "editor.command" => {
+                    new_config.editor.command = Some(value.clone());
+                    println!("{}", format!("Set editor.command to '{}'", value).green());
+                }
+                "display.colors_enabled" => {
+                    let enabled: bool = value.parse()
+                        .context("display.colors_enabled must be 'true' or 'false'")?;
+                    new_config.display.colors_enabled = enabled;
+                    println!("{}", format!("Set display.colors_enabled to {}", enabled).green());
+                }
+                "display.date_format" => {
+                    new_config.display.date_format = value.clone();
+                    println!("{}", format!("Set display.date_format to '{}'", value).green());
+                }
+                "display.entries_per_page" => {
+                    if value == "auto" || value == "none" {
+                        new_config.display.entries_per_page = None;
+                        println!("{}", "Set display.entries_per_page to auto (no limit)".green());
+                    } else {
+                        let per_page: usize = value.parse()
+                            .context("display.entries_per_page must be a number or 'auto'")?;
+                        new_config.display.entries_per_page = Some(per_page);
+                        println!("{}", format!("Set display.entries_per_page to {}", per_page).green());
+                    }
+                }
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.entries_per_page",
+                        key
+                    ));
+                }
+            }
+            
+            new_config.save()?;
+            println!("{}", "Configuration saved successfully".bright_green().bold());
+        }
+        Some(ConfigAction::Path) => {
+            let config_path = Config::get_config_path()?;
+            println!("{}", config_path.display());
+        }
+    }
+    
     Ok(())
 }
 
@@ -182,7 +292,7 @@ fn format_entry_summary(entry: &Entry) -> String {
     }
 }
 
-fn edit_entry(journal: &Journal, id: i64) -> Result<()> {
+fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     // Get the existing entry
     let entry = journal.get_entry(id)?.context("Entry not found")?;
 
@@ -198,8 +308,8 @@ fn edit_entry(journal: &Journal, id: i64) -> Result<()> {
     );
     fs::write(&temp_file, current_content)?;
 
-    // Get editor from environment or use default
-    let editor = env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
+    // Get editor from config
+    let editor = config.get_editor_command();
 
     // Open editor
     let status = Command::new(&editor)
