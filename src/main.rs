@@ -36,6 +36,12 @@ fn main() -> Result<()> {
     let db = Database::new(&config)?;
     let journal = Journal::new(db);
 
+    if config.display.colors_enabled {
+        colored::control::set_override(true);
+    } else {
+        colored::control::set_override(false);
+    }
+
     match cli.command {
         Some(command) => {
             cli::handle_command(command, &journal, &config, cli.journal.as_deref())?;
