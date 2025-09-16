@@ -1,5 +1,7 @@
 pub mod formatting;
+pub mod stardate;
 
+use crate::cli::stardate::Stardate;
 use crate::config::Config;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
@@ -131,7 +133,7 @@ pub fn handle_command(
         }
         Commands::Show { id } => match journal.get_entry(id)? {
             Some(entry) => {
-                print_entry(&entry);
+                print_entry(&entry, config.display.stardate_mode);
             }
             None => println!("{}", format!("Entry {} not found", id).red()),
         },
@@ -287,22 +289,44 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
     Ok(())
 }
 
-fn print_entry(entry: &Entry) {
+fn print_entry(entry: &Entry, stardate_mode: bool) {
     println!("{}", "─".repeat(60).bright_blue());
     println!(
         "{}: {}",
         "ID".cyan().bold(),
         entry.id.to_string().white().bold()
     );
-    println!(
-        "{}: {}",
-        "Date".cyan().bold(),
-        entry
-            .timestamp
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string()
-            .white()
-    );
+    if stardate_mode {
+        let stardate = entry.timestamp.to_stardate();
+        let stardate_string = format!("{:.5}", stardate);
+
+        // Split into head and last two characters safely
+        let chars: Vec<char> = stardate_string.chars().collect();
+        let (head, tail) = if chars.len() >= 2 {
+            let head: String = chars[..chars.len() - 2].iter().collect();
+            let tail: String = chars[chars.len() - 2..].iter().collect();
+            (head, tail)
+        } else {
+            (stardate_string.clone(), String::new())
+        };
+
+        println!(
+            "{}: {}{}",
+            "Stardate".cyan().bold(),
+            head.white(),
+            tail.bright_black(),
+        );
+    } else {
+        println!(
+            "{}: {}",
+            "Date".cyan().bold(),
+            entry
+                .timestamp
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+                .white()
+        );
+    }
     println!(
         "{}: {}",
         "Journal".cyan().bold(),
