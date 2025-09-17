@@ -131,14 +131,24 @@ impl Journal {
     }
 
     pub fn list_entries(&self) -> Result<Vec<Entry>> {
+        self.list_entries_with_order("created_at", "DESC")
+    }
+
+    pub fn list_entries_with_order(
+        &self,
+        order_field: &str,
+        order_direction: &str,
+    ) -> Result<Vec<Entry>> {
         let conn = self.db.connection();
 
-        let mut stmt = conn.prepare(
+        let query = format!(
             "SELECT id, timestamp, title, content, audio_path, image_paths,
                     journal, created_at, updated_at
-             FROM entries ORDER BY created_at DESC",
-        )?;
+             FROM entries ORDER BY {} {}",
+            order_field, order_direction
+        );
 
+        let mut stmt = conn.prepare(&query)?;
         let entry_iter = stmt.query_map([], Entry::from_row)?;
 
         let mut entries = Vec::new();
@@ -198,6 +208,18 @@ impl Journal {
         until: Option<&str>,
         journal: Option<&str>,
     ) -> Result<Vec<Entry>> {
+        self.list_entries_filtered_with_order(date, since, until, journal, "created_at", "DESC")
+    }
+
+    pub fn list_entries_filtered_with_order(
+        &self,
+        date: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        journal: Option<&str>,
+        order_field: &str,
+        order_direction: &str,
+    ) -> Result<Vec<Entry>> {
         let conn = self.db.connection();
         let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries".to_string();
         let mut conditions = Vec::new();
@@ -234,7 +256,7 @@ impl Journal {
             query.push_str(&conditions.join(" AND "));
         }
 
-        query.push_str(" ORDER BY created_at DESC");
+        query.push_str(&format!(" ORDER BY {} {}", order_field, order_direction));
 
         let mut stmt = conn.prepare(&query)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
