@@ -3,6 +3,7 @@ pub mod stardate;
 
 use crate::cli::stardate::Stardate;
 use crate::config::Config;
+use crate::export::{ExportFilters, Exporter};
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
@@ -73,6 +74,33 @@ pub enum Commands {
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
+    },
+
+    /// Export entries to various formats
+    Export {
+        /// Output file path
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Export format (currently only json is supported)
+        #[arg(short, long, default_value = "json")]
+        format: String,
+
+        /// Show entries from specific date (YYYY-MM-DD)
+        #[arg(long)]
+        date: Option<String>,
+
+        /// Show entries since date (YYYY-MM-DD)
+        #[arg(long)]
+        since: Option<String>,
+
+        /// Show entries until date (YYYY-MM-DD)
+        #[arg(long)]
+        until: Option<String>,
+
+        /// Filter by journal category
+        #[arg(long)]
+        journal: Option<String>,
     },
 }
 
@@ -172,6 +200,74 @@ pub fn handle_command(
         }
         Commands::Config { action } => {
             handle_config_command(action, config)?;
+        }
+        Commands::Export {
+            output,
+            format,
+            date,
+            since,
+            until,
+            journal: export_journal,
+        } => {
+            handle_export_command(
+                journal,
+                output,
+                &format,
+                date,
+                since,
+                until,
+                export_journal.or_else(|| global_journal.map(|s| s.to_string())),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_export_command(
+    journal: &Journal,
+    output_path: Option<String>,
+    format: &str,
+    date: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    journal_filter: Option<String>,
+) -> Result<()> {
+    match format.to_lowercase().as_str() {
+        "json" => {
+            let exporter = Exporter::new(journal);
+            let filters =
+                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
+                {
+                    Some(ExportFilters {
+                        date,
+                        since,
+                        until,
+                        journal: journal_filter,
+                    })
+                } else {
+                    None
+                };
+
+            // Clone output_path for post-export logging to avoid move issues.
+            // I have no idea if this is the best way to do this, but whatever.
+            let output_path_for_log = output_path.clone();
+
+            exporter.export_to_json(output_path, filters)?;
+            if let Some(ref path) = output_path_for_log {
+                println!(
+                    "{}",
+                    format!("Entries exported successfully to {}", path).green()
+                );
+            } else {
+                println!("{}", "Entries exported successfully to stdout".green());
+            }
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported export format '{}'. Currently supported formats: json",
+                format
+            ));
         }
     }
 

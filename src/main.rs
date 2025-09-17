@@ -6,6 +6,7 @@ use colored::*;
 mod cli;
 mod config;
 mod database;
+mod export;
 mod journal;
 
 use cli::Commands;

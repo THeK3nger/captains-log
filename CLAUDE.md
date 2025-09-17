@@ -8,6 +8,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Phase 2 Complete** - Advanced features implemented and tested
 ✅ **Configuration System** - Global configuration file support added
 ✅ **Journal Categories** - Support for organizing entries by journal type
+✅ **Export System** - JSON export functionality with filtering support
 
 ## Build & Test Commands
 
@@ -63,6 +64,12 @@ cargo build
 ./target/debug/cl config set database.path "/custom/path/journal.db"
 ./target/debug/cl config path
 
+# Export entries to JSON
+./target/debug/cl export --output entries.json
+./target/debug/cl export --output work_entries.json --journal Work
+./target/debug/cl export --output recent.json --since 2025-09-01
+./target/debug/cl export --output filtered.json --journal Personal --since 2025-09-01 --until 2025-09-30
+
 # Show help
 ./target/debug/cl --help
 ```
@@ -89,6 +96,8 @@ src/
 │   └── mod.rs           # Configuration management and file handling
 ├── database/
 │   └── mod.rs           # SQLite connection and migrations
+├── export/
+│   └── mod.rs           # Export functionality (JSON and future formats)
 └── journal/
     └── mod.rs           # Entry model and CRUD operations
 ```
@@ -143,9 +152,17 @@ src/
 - [x] Journal type displayed in entry summaries and detailed views
 - [x] Backward compatibility with existing entries
 
+### Export System
+- [x] JSON export functionality with structured output format
+- [x] Export filtering support (date, since, until, journal)
+- [x] Export metadata (version, export timestamp)
+- [x] CLI integration with comprehensive options
+- [x] Error handling for unsupported formats
+- [x] Foundation for additional export formats
+
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
-- [ ] Export functionality (markdown, JSON)
+- [ ] Additional export formats (markdown, CSV, XML)
 - [ ] Import from other journal formats
 - [ ] Full-text search improvements
 - [ ] Attachment support (images, files)
@@ -186,3 +203,13 @@ All functionality has been manually tested:
 5. Journal type displayed in both summary and detailed entry views
 6. Combined filtering (date + journal) operational
 7. Backward compatibility maintained for existing entries
+
+### Export System Testing
+1. JSON export functionality working correctly with proper format
+2. Export filtering by journal category operational
+3. Export filtering by date ranges (since, until, date) functional
+4. Combined filters (journal + date) working properly
+5. Export metadata (version, timestamp) included in output
+6. Error handling for unsupported formats working correctly
+7. CLI help documentation comprehensive and accurate
+8. File creation and directory handling working properly
