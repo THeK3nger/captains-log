@@ -8,7 +8,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Phase 2 Complete** - Advanced features implemented and tested
 ✅ **Configuration System** - Global configuration file support added
 ✅ **Journal Categories** - Support for organizing entries by journal type
-✅ **Export System** - JSON export functionality with filtering support
+✅ **Export System** - JSON and ORG export functionality with filtering support and optimized timestamp ordering
 
 ## Build & Test Commands
 
@@ -64,11 +64,13 @@ cargo build
 ./target/debug/cl config set database.path "/custom/path/journal.db"
 ./target/debug/cl config path
 
-# Export entries to JSON
-./target/debug/cl export --output entries.json
-./target/debug/cl export --output work_entries.json --journal Work
-./target/debug/cl export --output recent.json --since 2025-09-01
-./target/debug/cl export --output filtered.json --journal Personal --since 2025-09-01 --until 2025-09-30
+# Export entries to JSON or ORG format
+./target/debug/cl export --output entries.json --format json
+./target/debug/cl export --output entries.org --format org
+./target/debug/cl export --output work_entries.json --journal Work --format json
+./target/debug/cl export --output work_entries.org --journal Work --format org
+./target/debug/cl export --output recent.json --since 2025-09-01 --format json
+./target/debug/cl export --output filtered.org --journal Personal --since 2025-09-01 --until 2025-09-30 --format org
 
 # Show help
 ./target/debug/cl --help
@@ -97,7 +99,7 @@ src/
 ├── database/
 │   └── mod.rs           # SQLite connection and migrations
 ├── export/
-│   └── mod.rs           # Export functionality (JSON and future formats)
+│   └── mod.rs           # Export functionality (JSON and ORG formats)
 └── journal/
     └── mod.rs           # Entry model and CRUD operations
 ```
@@ -154,11 +156,14 @@ src/
 
 ### Export System
 - [x] JSON export functionality with structured output format
+- [x] ORG-mode export functionality with org-journal compatible format
 - [x] Export filtering support (date, since, until, journal)
 - [x] Export metadata (version, export timestamp)
 - [x] CLI integration with comprehensive options
 - [x] Error handling for unsupported formats
-- [x] Foundation for additional export formats
+- [x] Optimized timestamp ordering (oldest to newest) in exports
+- [x] Efficient database queries with configurable sort order
+- [x] Fixed ORG export chronological date grouping (uses NaiveDate keys instead of string sorting)
 
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
@@ -206,10 +211,14 @@ All functionality has been manually tested:
 
 ### Export System Testing
 1. JSON export functionality working correctly with proper format
-2. Export filtering by journal category operational
-3. Export filtering by date ranges (since, until, date) functional
-4. Combined filters (journal + date) working properly
-5. Export metadata (version, timestamp) included in output
-6. Error handling for unsupported formats working correctly
-7. CLI help documentation comprehensive and accurate
-8. File creation and directory handling working properly
+2. ORG-mode export functionality working with org-journal compatible format
+3. Export filtering by journal category operational
+4. Export filtering by date ranges (since, until, date) functional
+5. Combined filters (journal + date) working properly
+6. Export metadata (version, timestamp) included in output
+7. Error handling for unsupported formats working correctly
+8. CLI help documentation comprehensive and accurate
+9. File creation and directory handling working properly
+10. Timestamp ordering optimized (oldest to newest) in all export formats
+11. Database query performance improved with configurable sort order
+12. ORG export chronological date grouping fixed (proper date-based sorting)

@@ -13,6 +13,7 @@ directories = "5.0"
 anyhow = "1.0"
 colored = "3.0"
 pulldown-cmark = "0.13.0"
+regex = "1.11"
 
 [[bin]]
 name = "cl"

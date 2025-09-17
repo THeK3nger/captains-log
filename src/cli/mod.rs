@@ -263,6 +263,35 @@ fn handle_export_command(
                 println!("{}", "Entries exported successfully to stdout".green());
             }
         }
+        "org" => {
+            let exporter = Exporter::new(journal);
+            let filters =
+                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
+                {
+                    Some(ExportFilters {
+                        date,
+                        since,
+                        until,
+                        journal: journal_filter,
+                    })
+                } else {
+                    None
+                };
+
+            // Clone output_path for post-export logging to avoid move issues.
+            // I have no idea if this is the best way to do this, but whatever.
+            let output_path_for_log = output_path.clone();
+
+            exporter.export_to_org(output_path, filters)?;
+            if let Some(ref path) = output_path_for_log {
+                println!(
+                    "{}",
+                    format!("Entries exported successfully to {}", path).green()
+                );
+            } else {
+                println!("{}", "Entries exported successfully to stdout".green());
+            }
+        }
         _ => {
             return Err(anyhow::anyhow!(
                 "Unsupported export format '{}'. Currently supported formats: json",
