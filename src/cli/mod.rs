@@ -233,100 +233,70 @@ fn handle_export_command(
     until: Option<String>,
     journal_filter: Option<String>,
 ) -> Result<()> {
+    let filters = create_export_filters(date, since, until, journal_filter);
+    let exporter = Exporter::new(journal);
+
     match format.to_lowercase().as_str() {
         "json" => {
-            let exporter = Exporter::new(journal);
-            let filters =
-                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
-                {
-                    Some(ExportFilters {
-                        date,
-                        since,
-                        until,
-                        journal: journal_filter,
-                    })
-                } else {
-                    None
-                };
-
-            // Clone output_path for post-export logging to avoid move issues.
-            // I have no idea if this is the best way to do this, but whatever.
-            let output_path_for_log = output_path.clone();
-
-            exporter.export_to_json(output_path, filters)?;
-            if let Some(ref path) = output_path_for_log {
-                println!(
-                    "{}",
-                    format!("Entries exported successfully to {}", path).green()
-                );
-            } else {
-                println!("{}", "Entries exported successfully to stdout".green());
-            }
+            export_with_success_message(
+                || exporter.export_to_json(output_path.clone(), filters),
+                &output_path,
+            )?;
         }
         "md" | "markdown" => {
-            let exporter = Exporter::new(journal);
-            let filters =
-                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
-                {
-                    Some(ExportFilters {
-                        date,
-                        since,
-                        until,
-                        journal: journal_filter,
-                    })
-                } else {
-                    None
-                };
-
-            // Clone output_path for post-export logging to avoid move issues.
-            // I have no idea if this is the best way to do this, but whatever.
-            let output_path_for_log = output_path.clone();
-
-            exporter.export_to_markdown(output_path, filters)?;
-            if let Some(ref path) = output_path_for_log {
-                println!(
-                    "{}",
-                    format!("Entries exported successfully to {}", path).green()
-                );
-            } else {
-                println!("{}", "Entries exported successfully to stdout".green());
-            }
+            export_with_success_message(
+                || exporter.export_to_markdown(output_path.clone(), filters),
+                &output_path,
+            )?;
         }
         "org" => {
-            let exporter = Exporter::new(journal);
-            let filters =
-                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
-                {
-                    Some(ExportFilters {
-                        date,
-                        since,
-                        until,
-                        journal: journal_filter,
-                    })
-                } else {
-                    None
-                };
-
-            // Clone output_path for post-export logging to avoid move issues.
-            // I have no idea if this is the best way to do this, but whatever.
-            let output_path_for_log = output_path.clone();
-
-            exporter.export_to_org(output_path, filters)?;
-            if let Some(ref path) = output_path_for_log {
-                println!(
-                    "{}",
-                    format!("Entries exported successfully to {}", path).green()
-                );
-            } else {
-                println!("{}", "Entries exported successfully to stdout".green());
-            }
+            export_with_success_message(
+                || exporter.export_to_org(output_path.clone(), filters),
+                &output_path,
+            )?;
         }
         _ => {
             return Err(anyhow::anyhow!(
-                "Unsupported export format '{}'. Currently supported formats: json",
+                "Unsupported export format '{}'. Currently supported formats: json, markdown, org",
                 format
             ));
         }
+    }
+
+    Ok(())
+}
+
+fn create_export_filters(
+    date: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    journal_filter: Option<String>,
+) -> Option<ExportFilters> {
+    if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some() {
+        Some(ExportFilters {
+            date,
+            since,
+            until,
+            journal: journal_filter,
+        })
+    } else {
+        None
+    }
+}
+
+fn export_with_success_message<F>(export_fn: F, output_path: &Option<String>) -> Result<()>
+where
+    F: FnOnce() -> Result<()>,
+{
+    export_fn()?;
+
+    if let Some(path) = output_path {
+        println!(
+            "{}",
+            format!("Entries exported successfully to {}", path).green()
+        );
+    } else {
+        println!("{}", "Entries exported successfully to stdout".green());
     }
 
     Ok(())

@@ -27,18 +27,7 @@ impl<'a> Exporter<'a> {
         output_path: Option<String>,
         filters: Option<ExportFilters>,
     ) -> Result<()> {
-        let entries = if let Some(filters) = filters {
-            self.journal.list_entries_filtered_with_order(
-                filters.date.as_deref(),
-                filters.since.as_deref(),
-                filters.until.as_deref(),
-                filters.journal.as_deref(),
-                "timestamp",
-                "ASC",
-            )?
-        } else {
-            self.journal.list_entries_with_order("timestamp", "ASC")?
-        };
+        let entries = self.get_entries_for_export(filters)?;
 
         let export_data = ExportData {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -49,19 +38,11 @@ impl<'a> Exporter<'a> {
         let json_content = serde_json::to_string_pretty(&export_data)
             .context("Failed to serialize entries to JSON")?;
 
-        if output_path.is_some() {
-            let path: &str = output_path.as_deref().unwrap();
-            // Create directory if it doesn't exist
-            if let Some(parent) = Path::new(path).parent() {
-                fs::create_dir_all(parent).context("Failed to create output directory")?;
-            }
-
-            fs::write(path, json_content).context("Failed to write JSON file")?;
-        } else {
-            println!("{}", json_content);
-        }
-
-        Ok(())
+        self.write_output(
+            output_path,
+            json_content,
+            "Failed to write JSON file".to_string(),
+        )
     }
 
     pub fn export_to_markdown(
@@ -69,30 +50,10 @@ impl<'a> Exporter<'a> {
         output_path: Option<String>,
         filters: Option<ExportFilters>,
     ) -> Result<()> {
-        let entries = if let Some(filters) = filters {
-            self.journal.list_entries_filtered_with_order(
-                filters.date.as_deref(),
-                filters.since.as_deref(),
-                filters.until.as_deref(),
-                filters.journal.as_deref(),
-                "timestamp",
-                "ASC",
-            )?
-        } else {
-            self.journal.list_entries_with_order("timestamp", "ASC")?
-        };
+        let entries = self.get_entries_for_export(filters)?;
+        let grouped_entries = self.group_entries_by_date(&entries);
 
         let mut md_content = String::new();
-
-        // Group entries by date using NaiveDate for proper chronological ordering
-        use chrono::NaiveDate;
-        use std::collections::BTreeMap;
-        let mut grouped_entries: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
-        for entry in &entries {
-            let date_key = entry.timestamp.naive_utc().date();
-            grouped_entries.entry(date_key).or_default().push(entry);
-        }
-
         for (date, entries) in grouped_entries {
             let formatted_date = date.format("%A, %d %B %Y").to_string();
             md_content.push_str(&format!("## {}\n\n", formatted_date));
@@ -108,19 +69,11 @@ impl<'a> Exporter<'a> {
             }
         }
 
-        if output_path.is_some() {
-            let path: &str = output_path.as_deref().unwrap();
-            // Create directory if it doesn't exist
-            if let Some(parent) = Path::new(path).parent() {
-                fs::create_dir_all(parent).context("Failed to create output directory")?;
-            }
-
-            fs::write(path, md_content).context("Failed to write Markdown file")?;
-        } else {
-            println!("{}", md_content);
-        }
-
-        Ok(())
+        self.write_output(
+            output_path,
+            md_content,
+            "Failed to write Markdown file".to_string(),
+        )
     }
 
     pub fn export_to_org(
@@ -128,39 +81,10 @@ impl<'a> Exporter<'a> {
         output_path: Option<String>,
         filters: Option<ExportFilters>,
     ) -> Result<()> {
-        let entries = if let Some(filters) = filters {
-            self.journal.list_entries_filtered_with_order(
-                filters.date.as_deref(),
-                filters.since.as_deref(),
-                filters.until.as_deref(),
-                filters.journal.as_deref(),
-                "timestamp",
-                "ASC",
-            )?
-        } else {
-            self.journal.list_entries_with_order("timestamp", "ASC")?
-        };
+        let entries = self.get_entries_for_export(filters)?;
+        let grouped_entries = self.group_entries_by_date(&entries);
 
         let mut org_content = String::new();
-        // Entries are grouped by date as in org-journal format. Example:
-        // * Wednesday, 17/09/2025
-        // :PROPERTIES:
-        // :CREATED:  20250917
-        // :END:
-        // ** 19:31
-        // Entry content...
-        // ** 20:45
-        // Another entry content...
-
-        // Group entries by date using NaiveDate for proper chronological ordering
-        use chrono::NaiveDate;
-        use std::collections::BTreeMap;
-        let mut grouped_entries: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
-        for entry in &entries {
-            let date_key = entry.timestamp.naive_utc().date();
-            grouped_entries.entry(date_key).or_default().push(entry);
-        }
-
         for (date, entries) in grouped_entries {
             let created_date = entries
                 .first()
@@ -183,23 +107,66 @@ impl<'a> Exporter<'a> {
             }
         }
 
-        if output_path.is_some() {
-            let path: &str = output_path.as_deref().unwrap();
+        self.write_output(
+            output_path,
+            org_content,
+            "Failed to write Org file".to_string(),
+        )
+    }
+
+    /// Get entries for export, applying filters if provided
+    fn get_entries_for_export(&self, filters: Option<ExportFilters>) -> Result<Vec<Entry>> {
+        if let Some(filters) = filters {
+            self.journal.list_entries_filtered_with_order(
+                filters.date.as_deref(),
+                filters.since.as_deref(),
+                filters.until.as_deref(),
+                filters.journal.as_deref(),
+                "timestamp",
+                "ASC",
+            )
+        } else {
+            self.journal.list_entries_with_order("timestamp", "ASC")
+        }
+    }
+
+    /// Group entries by date using NaiveDate for proper chronological ordering
+    fn group_entries_by_date<'b>(
+        &self,
+        entries: &'b [Entry],
+    ) -> std::collections::BTreeMap<chrono::NaiveDate, Vec<&'b Entry>> {
+        use chrono::NaiveDate;
+        use std::collections::BTreeMap;
+
+        let mut grouped_entries: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
+        for entry in entries {
+            let date_key = entry.timestamp.naive_utc().date();
+            grouped_entries.entry(date_key).or_default().push(entry);
+        }
+        grouped_entries
+    }
+
+    /// Write output to file or stdout
+    fn write_output(
+        &self,
+        output_path: Option<String>,
+        content: String,
+        error_msg: String,
+    ) -> Result<()> {
+        if let Some(path) = output_path {
             // Create directory if it doesn't exist
-            if let Some(parent) = Path::new(path).parent() {
+            if let Some(parent) = Path::new(&path).parent() {
                 fs::create_dir_all(parent).context("Failed to create output directory")?;
             }
-
-            fs::write(path, org_content).context("Failed to write Org file")?;
+            fs::write(&path, content).context(error_msg)?;
         } else {
-            println!("{}", org_content);
+            println!("{}", content);
         }
-
         Ok(())
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExportFilters {
     pub date: Option<String>,
     pub since: Option<String>,
