@@ -64,6 +64,65 @@ impl<'a> Exporter<'a> {
         Ok(())
     }
 
+    pub fn export_to_markdown(
+        &self,
+        output_path: Option<String>,
+        filters: Option<ExportFilters>,
+    ) -> Result<()> {
+        let entries = if let Some(filters) = filters {
+            self.journal.list_entries_filtered_with_order(
+                filters.date.as_deref(),
+                filters.since.as_deref(),
+                filters.until.as_deref(),
+                filters.journal.as_deref(),
+                "timestamp",
+                "ASC",
+            )?
+        } else {
+            self.journal.list_entries_with_order("timestamp", "ASC")?
+        };
+
+        let mut md_content = String::new();
+
+        // Group entries by date using NaiveDate for proper chronological ordering
+        use chrono::NaiveDate;
+        use std::collections::BTreeMap;
+        let mut grouped_entries: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
+        for entry in &entries {
+            let date_key = entry.timestamp.naive_utc().date();
+            grouped_entries.entry(date_key).or_default().push(entry);
+        }
+
+        for (date, entries) in grouped_entries {
+            let formatted_date = date.format("%A, %d %B %Y").to_string();
+            md_content.push_str(&format!("## {}\n\n", formatted_date));
+
+            for entry in &entries {
+                let date_str = entry.timestamp.format("%H:%M").to_string();
+                if let Some(title) = &entry.title {
+                    md_content.push_str(&format!("### {} - {}\n\n", date_str, title));
+                } else {
+                    md_content.push_str(&format!("### {}\n\n", date_str));
+                }
+                md_content.push_str(&format!("{}\n\n", entry.content));
+            }
+        }
+
+        if output_path.is_some() {
+            let path: &str = output_path.as_deref().unwrap();
+            // Create directory if it doesn't exist
+            if let Some(parent) = Path::new(path).parent() {
+                fs::create_dir_all(parent).context("Failed to create output directory")?;
+            }
+
+            fs::write(path, md_content).context("Failed to write Markdown file")?;
+        } else {
+            println!("{}", md_content);
+        }
+
+        Ok(())
+    }
+
     pub fn export_to_org(
         &self,
         output_path: Option<String>,
