@@ -22,7 +22,7 @@ impl Database {
             fs::create_dir_all(parent)?;
         }
 
-        let conn = Connection::open(&db_path)
+        let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open database at {:?}", db_path))?;
 
         let mut db = Database { conn };
