@@ -8,7 +8,8 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Phase 2 Complete** - Advanced features implemented and tested
 ✅ **Configuration System** - Global configuration file support added
 ✅ **Journal Categories** - Support for organizing entries by journal type
-✅ **Export System** - JSON and ORG export functionality with filtering support and optimized timestamp ordering
+✅ **Export System** - JSON, Markdown, and ORG export functionality with filtering support and optimized timestamp ordering
+✅ **Database Override** - CLI parameter to override database location for any command
 
 ## Build & Test Commands
 
@@ -64,13 +65,21 @@ cargo build
 ./target/debug/cl config set database.path "/custom/path/journal.db"
 ./target/debug/cl config path
 
-# Export entries to JSON or ORG format
+# Export entries to JSON, Markdown, or ORG format
 ./target/debug/cl export --output entries.json --format json
+./target/debug/cl export --output entries.md --format markdown
 ./target/debug/cl export --output entries.org --format org
 ./target/debug/cl export --output work_entries.json --journal Work --format json
+./target/debug/cl export --output work_entries.md --journal Work --format markdown
 ./target/debug/cl export --output work_entries.org --journal Work --format org
 ./target/debug/cl export --output recent.json --since 2025-09-01 --format json
+./target/debug/cl export --output recent.md --since 2025-09-01 --format markdown
 ./target/debug/cl export --output filtered.org --journal Personal --since 2025-09-01 --until 2025-09-30 --format org
+
+# Override database location (global parameter for any command)
+./target/debug/cl -f "path/to/custom.db" "Entry with custom database"
+./target/debug/cl --file "/tmp/temp.db" list
+./target/debug/cl -f "backup.db" export --output backup.json --format json
 
 # Show help
 ./target/debug/cl --help
@@ -107,6 +116,7 @@ src/
 ## Database
 - Default Location: `~/.local/share/captains-log/journal.db`
 - Configurable via `database.path` setting
+- Override per-command with `-f` or `--file` parameter
 - Schema: entries table with id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at
 - Automatic migrations on first run
 - Journal field defaults to "Personal" for backward compatibility
@@ -156,6 +166,7 @@ src/
 
 ### Export System
 - [x] JSON export functionality with structured output format
+- [x] Markdown export functionality with date-based grouping
 - [x] ORG-mode export functionality with org-journal compatible format
 - [x] Export filtering support (date, since, until, journal)
 - [x] Export metadata (version, export timestamp)
@@ -165,9 +176,15 @@ src/
 - [x] Efficient database queries with configurable sort order
 - [x] Fixed ORG export chronological date grouping (uses NaiveDate keys instead of string sorting)
 
+### Database Override
+- [x] Global CLI parameter `-f`/`--file` to override database location
+- [x] Works with all commands (list, search, edit, export, etc.)
+- [x] Maintains backward compatibility with config and default database
+- [x] Automatic directory creation for custom database paths
+
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
-- [ ] Additional export formats (markdown, CSV, XML)
+- [ ] Additional export formats (CSV, XML)
 - [ ] Import from other journal formats
 - [ ] Full-text search improvements
 - [ ] Attachment support (images, files)
@@ -211,14 +228,24 @@ All functionality has been manually tested:
 
 ### Export System Testing
 1. JSON export functionality working correctly with proper format
-2. ORG-mode export functionality working with org-journal compatible format
-3. Export filtering by journal category operational
-4. Export filtering by date ranges (since, until, date) functional
-5. Combined filters (journal + date) working properly
-6. Export metadata (version, timestamp) included in output
-7. Error handling for unsupported formats working correctly
-8. CLI help documentation comprehensive and accurate
-9. File creation and directory handling working properly
-10. Timestamp ordering optimized (oldest to newest) in all export formats
-11. Database query performance improved with configurable sort order
-12. ORG export chronological date grouping fixed (proper date-based sorting)
+2. Markdown export functionality working with date-based grouping and proper formatting
+3. ORG-mode export functionality working with org-journal compatible format
+4. Export filtering by journal category operational
+5. Export filtering by date ranges (since, until, date) functional
+6. Combined filters (journal + date) working properly
+7. Export metadata (version, timestamp) included in output
+8. Error handling for unsupported formats working correctly
+9. CLI help documentation comprehensive and accurate
+10. File creation and directory handling working properly
+11. Timestamp ordering optimized (oldest to newest) in all export formats
+12. Database query performance improved with configurable sort order
+13. ORG export chronological date grouping fixed (proper date-based sorting)
+
+### Database Override Testing
+1. `-f` parameter works with quick entry creation
+2. `--file` parameter works with all commands (list, search, export, etc.)
+3. Custom database files are created automatically with proper migrations
+4. Directory structure is created for custom database paths
+5. Multiple separate databases can be maintained simultaneously
+6. Default database remains unaffected when using custom database override
+7. Backward compatibility maintained with existing configuration system
