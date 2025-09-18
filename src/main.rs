@@ -28,13 +28,21 @@ struct Cli {
     /// Journal category for quick entries
     #[arg(long, global = true)]
     journal: Option<String>,
+
+    /// Override database file location
+    #[arg(short = 'f', long = "file", global = true)]
+    database_file: Option<String>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config = Config::load()?;
-    let db = Database::new(&config)?;
+    let db = if let Some(db_file) = &cli.database_file {
+        Database::new_with_path(db_file)?
+    } else {
+        Database::new(&config)?
+    };
     let journal = Journal::new(db);
 
     if config.display.colors_enabled {
