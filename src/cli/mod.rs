@@ -500,11 +500,15 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     let temp_file = temp_dir.join(format!("captains-log-edit-{}.md", id));
 
     // Write current content to temp file
-    let current_content = format!(
-        "# {}\n\n{}",
-        entry.title.as_deref().unwrap_or(""),
-        entry.content
-    );
+    let current_content = if entry.title.is_some() {
+        format!(
+            "# {}\n\n{}",
+            entry.title.as_deref().unwrap_or(""),
+            entry.content
+        )
+    } else {
+        entry.content.clone()
+    };
     fs::write(&temp_file, current_content)?;
 
     // Get editor from config
@@ -527,19 +531,27 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     // Parse title and content
     let (title, content) = if lines.is_empty() {
         (None, String::new())
-    } else if lines.len() == 1 {
-        (None, lines[0].to_string())
     } else {
-        let title = if lines[0].trim().is_empty() {
-            None
+        let first_line = lines[0].trim();
+        if first_line.is_empty() && lines.len() == 1 {
+            // If the only line is empty, treat as empty content
+            // This should actually be an error.
+            (None, String::new())
+        } else if first_line.starts_with("# ") && lines.len() == 1 {
+            // If only title is present
+            (
+                Some(first_line.strip_prefix("# ").unwrap().trim()),
+                String::new(),
+            )
+        } else if first_line.starts_with("# ") && lines.len() > 1 {
+            // If title and content are present
+            let title = first_line.strip_prefix("# ").unwrap().trim();
+            let content = lines[1..].join("\n").trim().to_string();
+            (Some(title), content)
         } else {
-            let mut title = lines[0].trim();
-            // Remove leading '#' if present
-            title = title.strip_prefix('#').unwrap_or(title);
-            Some(title.trim())
-        };
-        let content = lines[1..].join("\n").trim().to_string();
-        (title, content)
+            // No title, all content
+            (None, edited_content.trim().to_string())
+        }
     };
 
     // Update the entry
