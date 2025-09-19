@@ -467,10 +467,11 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
 }
 
 fn format_entry_summary(entry: &Entry) -> String {
+    // Strip newlines and limit content preview to 40 chars.
     let content_preview = if entry.content.len() > 40 {
-        format!("{}...", &entry.content[..40])
+        format!("{}...", &entry.content[..40].replace('\n', " "))
     } else {
-        entry.content.clone()
+        entry.content.replace('\n', " ")
     };
 
     let id = format!("[{}]", entry.id).bright_blue().bold();
