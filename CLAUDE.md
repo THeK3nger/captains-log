@@ -10,6 +10,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Journal Categories** - Support for organizing entries by journal type
 ✅ **Export System** - JSON, Markdown, and ORG export functionality with filtering support and optimized timestamp ordering
 ✅ **Database Override** - CLI parameter to override database location for any command
+✅ **External Editor Entry Creation** - New command to create entries directly using external editor
 
 ## Build & Test Commands
 
@@ -42,6 +43,10 @@ cargo build
 
 # Delete entry  
 ./target/debug/cl delete <id>
+
+# Create new entry (opens external editor)
+./target/debug/cl new
+./target/debug/cl new --journal Work
 
 # Edit entry (opens external editor)
 ./target/debug/cl edit <id>
@@ -147,6 +152,7 @@ src/
 - [x] Rich terminal formatting with colors and improved layout
 - [x] Date-based filtering (--date, --since, --until options for list command)
 - [x] Entry editing capabilities
+- [x] New entry creation using external editor
 
 ### Configuration System
 - [x] Global configuration file support
@@ -181,6 +187,13 @@ src/
 - [x] Works with all commands (list, search, edit, export, etc.)
 - [x] Maintains backward compatibility with config and default database
 - [x] Automatic directory creation for custom database paths
+
+### External Editor Entry Creation
+- [x] New `new` command for creating entries using external editor
+- [x] Template-based entry creation with title and content parsing
+- [x] Support for journal category specification via --journal parameter
+- [x] Empty entry cancellation (no content provided)
+- [x] Consistent external editor integration using existing configuration
 
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
@@ -249,3 +262,14 @@ All functionality has been manually tested:
 5. Multiple separate databases can be maintained simultaneously
 6. Default database remains unaffected when using custom database override
 7. Backward compatibility maintained with existing configuration system
+
+### External Editor Entry Creation Testing
+1. New `new` command functionality working correctly
+2. External editor opens with template content (title placeholder)
+3. Title and content parsing from editor output functional
+4. Journal category specification via --journal parameter working
+5. Empty entry cancellation working (exits gracefully when no content)
+6. Entry creation with various content formats (title+content, content-only) operational
+7. Integration with existing editor configuration working correctly
+8. Database override parameter compatibility confirmed
+- When you test implementation, always use -f parameter to do that on a test db

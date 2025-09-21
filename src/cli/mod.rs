@@ -59,6 +59,13 @@ pub enum Commands {
         id: i64,
     },
 
+    /// Create a new entry using external editor
+    New {
+        /// Journal category for the new entry
+        #[arg(long)]
+        journal: Option<String>,
+    },
+
     /// Display calendar view of entries
     Calendar {
         /// Year to display (default: current year)
@@ -194,6 +201,10 @@ pub fn handle_command(
         }
         Commands::Edit { id } => {
             edit_entry(journal, id, config)?;
+        }
+        Commands::New { journal: new_journal } => {
+            let journal_category = new_journal.as_deref().or(global_journal);
+            new_entry(journal, journal_category, config)?;
         }
         Commands::Calendar { year, month } => {
             show_calendar(journal, year, month)?;
@@ -490,6 +501,75 @@ fn format_entry_summary(entry: &Entry) -> String {
     } else {
         format!("{} {} {} - {}", id, date, journal, content_preview.normal())
     }
+}
+
+fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config) -> Result<()> {
+    // Create a temporary file for the new entry
+    let temp_dir = env::temp_dir();
+    let temp_file = temp_dir.join("captains-log-new.md");
+
+    // Write template content to temp file
+    let template_content = "# \n\n";
+    fs::write(&temp_file, template_content)?;
+
+    // Get editor from config
+    let editor = config.get_editor_command();
+
+    // Open editor
+    let status = Command::new(&editor)
+        .arg(&temp_file)
+        .status()
+        .context("Failed to launch editor")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!("Editor exited with error"));
+    }
+
+    // Read the edited content
+    let edited_content = fs::read_to_string(&temp_file)?;
+    let lines: Vec<&str> = edited_content.lines().collect();
+
+    // Parse title and content
+    let (title, content) = if lines.is_empty() {
+        (None, String::new())
+    } else {
+        let first_line = lines[0].trim();
+        if first_line.is_empty() && lines.len() == 1 {
+            // If the only line is empty, treat as empty content
+            (None, String::new())
+        } else if first_line.starts_with("# ") && lines.len() == 1 {
+            // If only title is present
+            (
+                Some(first_line.strip_prefix("# ").unwrap().trim()),
+                String::new(),
+            )
+        } else if first_line.starts_with("# ") && lines.len() > 1 {
+            // If title and content are present
+            let title = first_line.strip_prefix("# ").unwrap().trim();
+            let content = lines[1..].join("\n").trim().to_string();
+            (Some(title), content)
+        } else {
+            // No title, all content
+            (None, edited_content.trim().to_string())
+        }
+    };
+
+    // Check if the content is empty
+    if content.is_empty() && (title.is_none() || title.as_ref().unwrap().is_empty()) {
+        println!("{}", "Entry creation cancelled - no content provided".yellow());
+        // Clean up temp file
+        let _ = fs::remove_file(&temp_file);
+        return Ok(());
+    }
+
+    // Create the entry
+    let id = journal.create_entry(title, &content, journal_category)?;
+    println!("{}", format!("Entry {} created successfully", id).green());
+
+    // Clean up temp file
+    let _ = fs::remove_file(&temp_file);
+
+    Ok(())
 }
 
 fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
