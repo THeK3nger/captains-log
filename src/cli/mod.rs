@@ -162,7 +162,7 @@ pub fn handle_command(
                 );
                 println!();
                 for entry in entries {
-                    println!("{}", format_entry_summary(&entry));
+                    println!("{}", format_entry_summary(&entry, config.display.stardate_mode));
                 }
             }
         }
@@ -188,7 +188,7 @@ pub fn handle_command(
                 );
                 println!();
                 for entry in entries {
-                    println!("{}", format_entry_summary(&entry));
+                    println!("{}", format_entry_summary(&entry, config.display.stardate_mode));
                 }
             }
         }
@@ -207,7 +207,7 @@ pub fn handle_command(
             new_entry(journal, journal_category, config)?;
         }
         Commands::Calendar { year, month } => {
-            show_calendar(journal, year, month)?;
+            show_calendar(journal, year, month, config)?;
         }
         Commands::Config { action } => {
             handle_config_command(action, config)?;
@@ -345,6 +345,10 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                 config.display.colors_enabled.to_string().green()
             );
             println!("  date_format: {}", config.display.date_format.green());
+            println!(
+                "  stardate_mode: {}",
+                config.display.stardate_mode.to_string().green()
+            );
             if let Some(entries_per_page) = config.display.entries_per_page {
                 println!(
                     "  entries_per_page: {}",
@@ -383,6 +387,16 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                         format!("Set display.date_format to '{}'", value).green()
                     );
                 }
+                "display.stardate_mode" => {
+                    let enabled: bool = value
+                        .parse()
+                        .context("display.stardate_mode must be 'true' or 'false'")?;
+                    new_config.display.stardate_mode = enabled;
+                    println!(
+                        "{}",
+                        format!("Set display.stardate_mode to {}", enabled).green()
+                    );
+                }
                 "display.entries_per_page" => {
                     if value == "auto" || value == "none" {
                         new_config.display.entries_per_page = None;
@@ -403,7 +417,7 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                 }
                 _ => {
                     return Err(anyhow::anyhow!(
-                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.entries_per_page",
+                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.stardate_mode, display.entries_per_page",
                         key
                     ));
                 }
@@ -477,7 +491,7 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
     println!("{}", "─".repeat(60).bright_blue());
 }
 
-fn format_entry_summary(entry: &Entry) -> String {
+fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
     // Strip newlines and limit content preview to 40 chars.
     let content_preview = if entry.content.len() > 40 {
         format!("{}...", &entry.content[..40].replace('\n', " "))
@@ -486,7 +500,26 @@ fn format_entry_summary(entry: &Entry) -> String {
     };
 
     let id = format!("[{}]", entry.id).bright_blue().bold();
-    let date = entry.timestamp.format("%Y-%m-%d %H:%M").to_string().white();
+
+    let date = if stardate_mode {
+        let stardate = entry.timestamp.to_stardate();
+        let stardate_string = format!("{:.5}", stardate);
+
+        // Split into head and last two characters safely
+        let chars: Vec<char> = stardate_string.chars().collect();
+        let (head, tail) = if chars.len() >= 2 {
+            let head: String = chars[..chars.len() - 2].iter().collect();
+            let tail: String = chars[chars.len() - 2..].iter().collect();
+            (head, tail)
+        } else {
+            (stardate_string.clone(), String::new())
+        };
+
+        format!("{}{}", head.white(), tail.bright_black()).to_string()
+    } else {
+        entry.timestamp.format("%Y-%m-%d %H:%M").to_string().white().to_string()
+    };
+
     let journal = format!("[{}]", entry.journal).magenta().bold();
 
     if let Some(title) = &entry.title {
@@ -648,7 +681,7 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn show_calendar(journal: &Journal, year: Option<i32>, month: Option<u32>) -> Result<()> {
+fn show_calendar(journal: &Journal, year: Option<i32>, month: Option<u32>, config: &Config) -> Result<()> {
     let now = Local::now();
     let year = year.unwrap_or(now.year());
     let month = month.unwrap_or(now.month());
@@ -740,7 +773,7 @@ fn show_calendar(journal: &Journal, year: Option<i32>, month: Option<u32>) -> Re
         );
         println!();
         for entry in entries {
-            println!("{}", format_entry_summary(&entry));
+            println!("{}", format_entry_summary(&entry, config.display.stardate_mode));
         }
     }
 
