@@ -11,6 +11,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Export System** - JSON, Markdown, and ORG export functionality with filtering support and optimized timestamp ordering
 ✅ **Database Override** - CLI parameter to override database location for any command
 ✅ **External Editor Entry Creation** - New command to create entries directly using external editor
+✅ **Stardate Mode Integration** - Consistent stardate formatting across all entry display commands
 
 ## Build & Test Commands
 
@@ -68,6 +69,7 @@ cargo build
 ./target/debug/cl config show
 ./target/debug/cl config set editor.command "code --wait"
 ./target/debug/cl config set database.path "/custom/path/journal.db"
+./target/debug/cl config set display.stardate_mode true
 ./target/debug/cl config path
 
 # Export entries to JSON, Markdown, or ORG format
@@ -107,7 +109,9 @@ cargo fmt
 src/
 ├── main.rs              # CLI entry point and argument parsing
 ├── cli/
-│   └── mod.rs           # Command handling and help text
+│   ├── mod.rs           # Command handling and help text
+│   ├── formatting.rs    # Markdown rendering utilities
+│   └── stardate.rs      # Stardate conversion system
 ├── config/
 │   └── mod.rs           # Configuration management and file handling
 ├── database/
@@ -134,6 +138,7 @@ src/
   - `editor.command` - Custom editor for entry editing
   - `display.colors_enabled` - Enable/disable colored output
   - `display.date_format` - Custom date format string
+  - `display.stardate_mode` - Enable/disable stardate display format
   - `display.entries_per_page` - Pagination limit
 
 ## Features Implemented
@@ -194,6 +199,13 @@ src/
 - [x] Support for journal category specification via --journal parameter
 - [x] Empty entry cancellation (no content provided)
 - [x] Consistent external editor integration using existing configuration
+
+### Stardate Mode Integration
+- [x] Configurable stardate display mode via `display.stardate_mode` setting
+- [x] Consistent stardate formatting across list, search, show, and calendar commands
+- [x] Stardate calculation based on Star Trek premiere date (September 8, 1966)
+- [x] Visual formatting with grayed-out fractional components for readability
+- [x] Seamless switching between standard timestamps and stardate format
 
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
@@ -272,4 +284,15 @@ All functionality has been manually tested:
 6. Entry creation with various content formats (title+content, content-only) operational
 7. Integration with existing editor configuration working correctly
 8. Database override parameter compatibility confirmed
+
+### Stardate Mode Integration Testing
+1. Stardate mode configuration setting and management working correctly
+2. List command displays stardates when stardate_mode is enabled
+3. Search command displays stardates in search results when enabled
+4. Calendar command displays stardates in entry listings when enabled
+5. Show command maintains existing stardate functionality
+6. Consistent visual formatting (grayed-out fractional components) across all commands
+7. Seamless switching between standard timestamps and stardate display
+8. Configuration persistence across application restarts
+9. Backward compatibility maintained with existing timestamp functionality
 - When you test implementation, always use -f parameter to do that on a test db
