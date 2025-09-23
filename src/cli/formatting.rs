@@ -1,5 +1,6 @@
 use colored::*;
 use pulldown_cmark::{Event, HeadingLevel, Options, Tag, TagEnd};
+use terminal_size::{Width, terminal_size};
 
 pub fn render_markdown(content: &str) -> String {
     let mut options = Options::empty();
@@ -175,4 +176,55 @@ fn hyperlink_start(link_url: &str) -> String {
 #[inline]
 fn hyperlink_end() -> &'static str {
     OSC8_LINK_END
+}
+
+/// Get the terminal width for wrapping text, capped at 100 columns.
+/// If the terminal size cannot be determined, defaults to 100.
+///
+/// TODO: 100 is arbitrary, consider making it configurable.
+pub fn get_wrap_width() -> u16 {
+    let size = terminal_size();
+    // Try to get terminal width, fallback to 100
+    if let Some((Width(w), _)) = size {
+        std::cmp::min(w, 100)
+    } else {
+        100
+    }
+}
+
+/// Wrap text to the specified width, preserving existing line breaks.
+///
+/// TODO: handle ANSI escape codes properly so that they don't count towards the width.
+///
+/// # Arguments
+/// * `text` - The input text to wrap.
+/// * `width` - The maximum width of each line.
+///
+/// # Returns
+/// A new `String` with the text wrapped to the specified width.
+///
+/// # Example
+///
+/// ```
+/// let text = "This is a long line that needs to be wrapped.";
+/// let wrapped = wrap_text(text, 20);
+/// println!("{}", wrapped);
+/// ```
+pub fn wrap_text(text: &str, width: u16) -> String {
+    use textwrap::{Options, wrap};
+
+    let opts = Options::new(width as usize)
+        // Keep long “words” (like very long URLs) from exceeding the width.
+        .break_words(true);
+
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                wrap(line, &opts).join("\n")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

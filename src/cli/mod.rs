@@ -1,6 +1,7 @@
 pub mod formatting;
 pub mod stardate;
 
+use crate::cli::formatting::{get_wrap_width, wrap_text};
 use crate::cli::stardate::Stardate;
 use crate::config::Config;
 use crate::export::{ExportFilters, Exporter};
@@ -447,7 +448,8 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
 }
 
 fn print_entry(entry: &Entry, stardate_mode: bool) {
-    println!("{}", "─".repeat(60).bright_blue());
+    let width = get_wrap_width();
+    println!("{}", "─".repeat(width as usize).bright_blue());
     println!(
         "{}: {}",
         "ID".cyan().bold(),
@@ -478,11 +480,15 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
     if let Some(title) = &entry.title {
         println!("{}: {}", "Title".cyan().bold(), title.green().bold());
     }
-    println!("{}", "─".repeat(60).bright_blue());
+
+    let content = render_markdown(&entry.content);
+    let wrapped_content = wrap_text(&content, width);
+
+    println!("{}", "─".repeat(width as usize).bright_blue());
     println!();
-    println!("{}", render_markdown(&entry.content));
+    println!("{}", wrapped_content);
     println!();
-    println!("{}", "─".repeat(60).bright_blue());
+    println!("{}", "─".repeat(width as usize).bright_blue());
 }
 
 fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
