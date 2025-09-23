@@ -54,6 +54,14 @@ pub enum Commands {
         id: i64,
     },
 
+    /// Move an entry to a different journal
+    Move {
+        /// Entry ID to move
+        id: i64,
+        /// Target journal name
+        journal: String,
+    },
+
     /// Edit an existing entry
     Edit {
         /// Entry ID to edit
@@ -204,6 +212,28 @@ pub fn handle_command(
                 println!("{}", format!("Entry {} deleted", id).green());
             } else {
                 println!("{}", format!("Entry {} not found", id).red());
+            }
+        }
+        Commands::Move { id, journal: target_journal } => {
+            match journal.get_entry(id)? {
+                Some(entry) => {
+                    let old_journal = &entry.journal;
+                    if journal.move_entry(id, &target_journal)? {
+                        println!(
+                            "{}",
+                            format!(
+                                "Entry {} moved from '{}' to '{}'",
+                                id, old_journal, target_journal
+                            )
+                            .green()
+                        );
+                    } else {
+                        println!("{}", format!("Failed to move entry {}", id).red());
+                    }
+                }
+                None => {
+                    println!("{}", format!("Entry {} not found", id).red());
+                }
             }
         }
         Commands::Edit { id } => {

@@ -201,6 +201,18 @@ impl Journal {
         Ok(rows_affected > 0)
     }
 
+    pub fn move_entry(&self, id: i64, new_journal: &str) -> Result<bool> {
+        let conn = self.db.connection();
+        let now = Utc::now();
+
+        let rows_affected = conn.execute(
+            "UPDATE entries SET journal = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_journal, now, id],
+        )?;
+
+        Ok(rows_affected > 0)
+    }
+
     pub fn list_entries_filtered(
         &self,
         date: Option<&str>,

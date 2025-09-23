@@ -42,8 +42,11 @@ cargo build
 # Search entries
 ./target/debug/cl search "<query>"
 
-# Delete entry  
+# Delete entry
 ./target/debug/cl delete <id>
+
+# Move entry to different journal
+./target/debug/cl move <id> <target_journal>
 
 # Create new entry (opens external editor)
 ./target/debug/cl new
@@ -82,6 +85,11 @@ cargo build
 ./target/debug/cl export --output recent.json --since 2025-09-01 --format json
 ./target/debug/cl export --output recent.md --since 2025-09-01 --format markdown
 ./target/debug/cl export --output filtered.org --journal Personal --since 2025-09-01 --until 2025-09-30 --format org
+
+# Move entries between journals
+./target/debug/cl move 123 Work
+./target/debug/cl move 456 Personal
+./target/debug/cl move 789 Projects
 
 # Override database location (global parameter for any command)
 ./target/debug/cl -f "path/to/custom.db" "Entry with custom database"
