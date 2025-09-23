@@ -162,7 +162,10 @@ pub fn handle_command(
                 );
                 println!();
                 for entry in entries {
-                    println!("{}", format_entry_summary(&entry, config.display.stardate_mode));
+                    println!(
+                        "{}",
+                        format_entry_summary(&entry, config.display.stardate_mode)
+                    );
                 }
             }
         }
@@ -188,7 +191,10 @@ pub fn handle_command(
                 );
                 println!();
                 for entry in entries {
-                    println!("{}", format_entry_summary(&entry, config.display.stardate_mode));
+                    println!(
+                        "{}",
+                        format_entry_summary(&entry, config.display.stardate_mode)
+                    );
                 }
             }
         }
@@ -202,7 +208,9 @@ pub fn handle_command(
         Commands::Edit { id } => {
             edit_entry(journal, id, config)?;
         }
-        Commands::New { journal: new_journal } => {
+        Commands::New {
+            journal: new_journal,
+        } => {
             let journal_category = new_journal.as_deref().or(global_journal);
             new_entry(journal, journal_category, config)?;
         }
@@ -447,24 +455,10 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
     );
     if stardate_mode {
         let stardate = entry.timestamp.to_stardate();
-        let stardate_string = format!("{:.5}", stardate);
 
-        // Split into head and last two characters safely
-        let chars: Vec<char> = stardate_string.chars().collect();
-        let (head, tail) = if chars.len() >= 2 {
-            let head: String = chars[..chars.len() - 2].iter().collect();
-            let tail: String = chars[chars.len() - 2..].iter().collect();
-            (head, tail)
-        } else {
-            (stardate_string.clone(), String::new())
-        };
+        let stardate_string = format_stardate(stardate);
 
-        println!(
-            "{}: {}{}",
-            "Stardate".cyan().bold(),
-            head.white(),
-            tail.bright_black(),
-        );
+        println!("{}: {}", "Stardate".cyan().bold(), stardate_string);
     } else {
         println!(
             "{}: {}",
@@ -503,21 +497,14 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
 
     let date = if stardate_mode {
         let stardate = entry.timestamp.to_stardate();
-        let stardate_string = format!("{:.5}", stardate);
-
-        // Split into head and last two characters safely
-        let chars: Vec<char> = stardate_string.chars().collect();
-        let (head, tail) = if chars.len() >= 2 {
-            let head: String = chars[..chars.len() - 2].iter().collect();
-            let tail: String = chars[chars.len() - 2..].iter().collect();
-            (head, tail)
-        } else {
-            (stardate_string.clone(), String::new())
-        };
-
-        format!("{}{}", head.white(), tail.bright_black()).to_string()
+        format_stardate(stardate)
     } else {
-        entry.timestamp.format("%Y-%m-%d %H:%M").to_string().white().to_string()
+        entry
+            .timestamp
+            .format("%Y-%m-%d %H:%M")
+            .to_string()
+            .white()
+            .to_string()
     };
 
     let journal = format!("[{}]", entry.journal).magenta().bold();
@@ -534,6 +521,22 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
     } else {
         format!("{} {} {} - {}", id, date, journal, content_preview.normal())
     }
+}
+
+fn format_stardate(stardate: f64) -> String {
+    let stardate_string = format!("{:.5}", stardate);
+
+    // Split into head and last two characters safely
+    let chars: Vec<char> = stardate_string.chars().collect();
+    let (head, tail) = if chars.len() >= 2 {
+        let head: String = chars[..chars.len() - 2].iter().collect();
+        let tail: String = chars[chars.len() - 2..].iter().collect();
+        (head, tail)
+    } else {
+        (stardate_string.clone(), String::new())
+    };
+
+    format!("{}{}", head.white(), tail.bright_black()).to_string()
 }
 
 fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config) -> Result<()> {
@@ -589,7 +592,10 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
 
     // Check if the content is empty
     if content.is_empty() && (title.is_none() || title.as_ref().unwrap().is_empty()) {
-        println!("{}", "Entry creation cancelled - no content provided".yellow());
+        println!(
+            "{}",
+            "Entry creation cancelled - no content provided".yellow()
+        );
         // Clean up temp file
         let _ = fs::remove_file(&temp_file);
         return Ok(());
@@ -681,7 +687,12 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn show_calendar(journal: &Journal, year: Option<i32>, month: Option<u32>, config: &Config) -> Result<()> {
+fn show_calendar(
+    journal: &Journal,
+    year: Option<i32>,
+    month: Option<u32>,
+    config: &Config,
+) -> Result<()> {
     let now = Local::now();
     let year = year.unwrap_or(now.year());
     let month = month.unwrap_or(now.month());
@@ -773,7 +784,10 @@ fn show_calendar(journal: &Journal, year: Option<i32>, month: Option<u32>, confi
         );
         println!();
         for entry in entries {
-            println!("{}", format_entry_summary(&entry, config.display.stardate_mode));
+            println!(
+                "{}",
+                format_entry_summary(&entry, config.display.stardate_mode)
+            );
         }
     }
 
