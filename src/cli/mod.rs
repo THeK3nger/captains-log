@@ -217,7 +217,12 @@ pub fn handle_command(
                     println!();
 
                     // Ask for confirmation
-                    print!("{}", "Are you sure you want to delete this entry? (y/N): ".red().bold());
+                    print!(
+                        "{}",
+                        "Are you sure you want to delete this entry? (y/N): "
+                            .red()
+                            .bold()
+                    );
                     std::io::Write::flush(&mut std::io::stdout())?;
 
                     let mut input = String::new();
@@ -239,28 +244,29 @@ pub fn handle_command(
                 }
             }
         }
-        Commands::Move { id, journal: target_journal } => {
-            match journal.get_entry(id)? {
-                Some(entry) => {
-                    let old_journal = &entry.journal;
-                    if journal.move_entry(id, &target_journal)? {
-                        println!(
-                            "{}",
-                            format!(
-                                "Entry {} moved from '{}' to '{}'",
-                                id, old_journal, target_journal
-                            )
-                            .green()
-                        );
-                    } else {
-                        println!("{}", format!("Failed to move entry {}", id).red());
-                    }
-                }
-                None => {
-                    println!("{}", format!("Entry {} not found", id).red());
+        Commands::Move {
+            id,
+            journal: target_journal,
+        } => match journal.get_entry(id)? {
+            Some(entry) => {
+                let old_journal = &entry.journal;
+                if journal.move_entry(id, &target_journal)? {
+                    println!(
+                        "{}",
+                        format!(
+                            "Entry {} moved from '{}' to '{}'",
+                            id, old_journal, target_journal
+                        )
+                        .green()
+                    );
+                } else {
+                    println!("{}", format!("Failed to move entry {}", id).red());
                 }
             }
-        }
+            None => {
+                println!("{}", format!("Entry {} not found", id).red());
+            }
+        },
         Commands::Edit { id } => {
             edit_entry(journal, id, config)?;
         }
