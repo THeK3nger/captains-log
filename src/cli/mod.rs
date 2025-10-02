@@ -208,10 +208,35 @@ pub fn handle_command(
             }
         }
         Commands::Delete { id } => {
-            if journal.delete_entry(id)? {
-                println!("{}", format!("Entry {} deleted", id).green());
-            } else {
-                println!("{}", format!("Entry {} not found", id).red());
+            match journal.get_entry(id)? {
+                Some(entry) => {
+                    // Show the entry to be deleted
+                    println!("{}", "Entry to be deleted:".yellow().bold());
+                    println!();
+                    print_entry(&entry, config.display.stardate_mode);
+                    println!();
+
+                    // Ask for confirmation
+                    print!("{}", "Are you sure you want to delete this entry? (y/N): ".red().bold());
+                    std::io::Write::flush(&mut std::io::stdout())?;
+
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input)?;
+                    let input = input.trim().to_lowercase();
+
+                    if input == "y" || input == "yes" {
+                        if journal.delete_entry(id)? {
+                            println!("{}", format!("Entry {} deleted", id).green());
+                        } else {
+                            println!("{}", format!("Failed to delete entry {}", id).red());
+                        }
+                    } else {
+                        println!("{}", "Deletion cancelled".yellow());
+                    }
+                }
+                None => {
+                    println!("{}", format!("Entry {} not found", id).red());
+                }
             }
         }
         Commands::Move { id, journal: target_journal } => {
