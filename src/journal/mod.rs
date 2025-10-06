@@ -189,6 +189,17 @@ impl Journal {
         Ok(rows_affected > 0)
     }
 
+    /// Update entry's title and content. Returns true if the entry was found and updated.
+    ///
+    /// Note: This is currenltly replaced by `update_entry_with_metadata` which also updates journal and timestamp.
+    ///
+    /// # Arguments
+    /// * `id` - The ID of the entry to update.
+    /// * `title` - The new title for the entry. Use `None` to clear the title.
+    /// * `content` - The new content for the entry.
+    ///
+    /// # Returns
+    /// * `Result<bool>` - Ok(true) if the entry was updated, Ok(false) if not found, Err on error.
     pub fn update_entry(&self, id: i64, title: Option<&str>, content: &str) -> Result<bool> {
         let conn = self.db.connection();
         let now = Utc::now();
@@ -196,6 +207,36 @@ impl Journal {
         let rows_affected = conn.execute(
             "UPDATE entries SET title = ?1, content = ?2, updated_at = ?3 WHERE id = ?4",
             params![title, content, now, id],
+        )?;
+
+        Ok(rows_affected > 0)
+    }
+
+    /// Update entry's title, content, journal, and timestamp. Returns true if the entry was found and updated.
+    ///
+    /// # Arguments
+    /// * `id` - The ID of the entry to update.
+    /// * `title` - The new title for the entry. Use `None` to clear the title.
+    /// * `content` - The new content for the entry.
+    /// * `journal` - The new journal for the entry.
+    /// * `timestamp` - The new timestamp for the entry.
+    ///
+    /// # Returns
+    /// * `Result<bool>` - Ok(true) if the entry was updated, Ok(false) if not found, Err on error.
+    pub fn update_entry_with_metadata(
+        &self,
+        id: i64,
+        title: Option<&str>,
+        content: &str,
+        journal: &str,
+        timestamp: DateTime<Utc>,
+    ) -> Result<bool> {
+        let conn = self.db.connection();
+        let now = Utc::now();
+
+        let rows_affected = conn.execute(
+            "UPDATE entries SET title = ?1, content = ?2, journal = ?3, timestamp = ?4, updated_at = ?5 WHERE id = ?6",
+            params![title, content, journal, timestamp, now, id],
         )?;
 
         Ok(rows_affected > 0)

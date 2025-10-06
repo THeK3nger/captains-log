@@ -1,7 +1,9 @@
 pub mod formatting;
+pub mod frontmatter;
 pub mod stardate;
 
 use crate::cli::formatting::{get_wrap_width, wrap_text};
+use crate::cli::frontmatter::{format_entry_with_frontmatter, parse_frontmatter};
 use crate::cli::stardate::Stardate;
 use crate::config::Config;
 use crate::export::{ExportFilters, Exporter};
@@ -686,8 +688,8 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     let temp_dir = env::temp_dir();
     let temp_file = temp_dir.join(format!("captains-log-edit-{}.md", id));
 
-    // Write current content to temp file
-    let current_content = if entry.title.is_some() {
+    // Format content with title if present
+    let body_content = if entry.title.is_some() {
         format!(
             "# {}\n\n{}",
             entry.title.as_deref().unwrap_or(""),
@@ -696,7 +698,11 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     } else {
         entry.content.clone()
     };
-    fs::write(&temp_file, current_content)?;
+
+    // Write current content with YAML frontmatter to temp file
+    let content_with_frontmatter =
+        format_entry_with_frontmatter(&entry.journal, entry.timestamp, &body_content)?;
+    fs::write(&temp_file, content_with_frontmatter)?;
 
     // Get editor from config
     let editor = config.get_editor_command();
@@ -713,16 +719,21 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
 
     // Read the edited content
     let edited_content = fs::read_to_string(&temp_file)?;
-    let lines: Vec<&str> = edited_content.lines().collect();
 
-    // Parse title and content
+    // Parse frontmatter and content
+    let (metadata, body) = parse_frontmatter(&edited_content).context(
+        "Failed to parse entry. Make sure the YAML frontmatter is properly formatted with '---' delimiters",
+    )?;
+
+    let lines: Vec<&str> = body.lines().collect();
+
+    // Parse title and content from the body
     let (title, content) = if lines.is_empty() {
         (None, String::new())
     } else {
         let first_line = lines[0].trim();
         if first_line.is_empty() && lines.len() == 1 {
             // If the only line is empty, treat as empty content
-            // This should actually be an error.
             (None, String::new())
         } else if first_line.starts_with("# ") && lines.len() == 1 {
             // If only title is present
@@ -737,12 +748,18 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
             (Some(title), content)
         } else {
             // No title, all content
-            (None, edited_content.trim().to_string())
+            (None, body.trim().to_string())
         }
     };
 
-    // Update the entry
-    if journal.update_entry(id, title, &content)? {
+    // Update the entry with metadata
+    if journal.update_entry_with_metadata(
+        id,
+        title,
+        &content,
+        &metadata.journal,
+        metadata.timestamp,
+    )? {
         println!("{}", format!("Entry {} updated successfully", id).green());
     } else {
         println!("{}", format!("Failed to update entry {}", id).red());
