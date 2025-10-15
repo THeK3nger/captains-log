@@ -31,7 +31,7 @@ struct Cli {
     journal: Option<String>,
 
     /// Override database file location
-    #[arg(short = 'f', long = "file", global = true)]
+    #[arg(short = 'd', long = "database", global = true)]
     database_file: Option<String>,
 }
 
