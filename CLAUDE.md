@@ -92,9 +92,9 @@ cargo build
 ./target/debug/cl move 789 Projects
 
 # Override database location (global parameter for any command)
-./target/debug/cl -f "path/to/custom.db" "Entry with custom database"
-./target/debug/cl --file "/tmp/temp.db" list
-./target/debug/cl -f "backup.db" export --output backup.json --format json
+./target/debug/cl -d "path/to/custom.db" "Entry with custom database"
+./target/debug/cl --database "/tmp/temp.db" list
+./target/debug/cl -d "backup.db" export --output backup.json --format json
 
 # Show help
 ./target/debug/cl --help
@@ -133,7 +133,7 @@ src/
 ## Database
 - Default Location: `~/.local/share/captains-log/journal.db`
 - Configurable via `database.path` setting
-- Override per-command with `-f` or `--file` parameter
+- Override per-command with `-d` or `--database` parameter
 - Schema: entries table with id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at
 - Automatic migrations on first run
 - Journal field defaults to "Personal" for backward compatibility
@@ -196,7 +196,7 @@ src/
 - [x] Fixed ORG export chronological date grouping (uses NaiveDate keys instead of string sorting)
 
 ### Database Override
-- [x] Global CLI parameter `-f`/`--file` to override database location
+- [x] Global CLI parameter `-d`/`--database` to override database location
 - [x] Works with all commands (list, search, edit, export, etc.)
 - [x] Maintains backward compatibility with config and default database
 - [x] Automatic directory creation for custom database paths
@@ -275,8 +275,8 @@ All functionality has been manually tested:
 13. ORG export chronological date grouping fixed (proper date-based sorting)
 
 ### Database Override Testing
-1. `-f` parameter works with quick entry creation
-2. `--file` parameter works with all commands (list, search, export, etc.)
+1. `-d` parameter works with quick entry creation
+2. `--database` parameter works with all commands (list, search, export, etc.)
 3. Custom database files are created automatically with proper migrations
 4. Directory structure is created for custom database paths
 5. Multiple separate databases can be maintained simultaneously
@@ -303,4 +303,4 @@ All functionality has been manually tested:
 7. Seamless switching between standard timestamps and stardate display
 8. Configuration persistence across application restarts
 9. Backward compatibility maintained with existing timestamp functionality
-- When you test implementation, always use -f parameter to do that on a test db
+- When you test implementation, always use -d parameter to do that on a test db
