@@ -1,3 +1,4 @@
+pub mod dateparser;
 pub mod formatting;
 pub mod frontmatter;
 pub mod stardate;
@@ -12,6 +13,7 @@ use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use clap::Subcommand;
 use colored::*;
+use dateparser::parse_relative_date;
 use formatting::render_markdown;
 use std::env;
 use std::fs;
@@ -151,13 +153,28 @@ pub fn handle_command(
             journal: list_journal,
         } => {
             let journal_filter = list_journal.as_deref().or(global_journal);
+
+            // Parse date filters using .map().transpose() pattern
+            let date_filter = date.as_deref()
+                .map(parse_relative_date)
+                .transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid date: {}", e))?;
+            let since_filter = since.as_deref()
+                .map(parse_relative_date)
+                .transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid since date: {}", e))?;
+            let until_filter = until.as_deref()
+                .map(parse_relative_date)
+                .transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid until date: {}", e))?;
+
             let entries =
-                if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some()
+                if date_filter.is_some() || since_filter.is_some() || until_filter.is_some() || journal_filter.is_some()
                 {
                     journal.list_entries_filtered(
-                        date.as_deref(),
-                        since.as_deref(),
-                        until.as_deref(),
+                        date_filter.as_ref(),
+                        since_filter.as_ref(),
+                        until_filter.as_ref(),
                         journal_filter,
                     )?
                 } else {

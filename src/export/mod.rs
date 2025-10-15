@@ -1,3 +1,4 @@
+use crate::cli::dateparser::parse_relative_date;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
 use pulldown_cmark::{Event, Options, Tag, TagEnd};
@@ -117,10 +118,18 @@ impl<'a> Exporter<'a> {
     /// Get entries for export, applying filters if provided
     fn get_entries_for_export(&self, filters: Option<ExportFilters>) -> Result<Vec<Entry>> {
         if let Some(filters) = filters {
+            // Parse date filters using .map().transpose() pattern
+            let date = filters.date.as_deref().map(parse_relative_date).transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid date filter: {}", e))?;
+            let since = filters.since.as_deref().map(parse_relative_date).transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid since filter: {}", e))?;
+            let until = filters.until.as_deref().map(parse_relative_date).transpose()
+                .map_err(|e| anyhow::anyhow!("Invalid until filter: {}", e))?;
+
             self.journal.list_entries_filtered_with_order(
-                filters.date.as_deref(),
-                filters.since.as_deref(),
-                filters.until.as_deref(),
+                date.as_ref(),
+                since.as_ref(),
+                until.as_ref(),
                 filters.journal.as_deref(),
                 "timestamp",
                 "ASC",

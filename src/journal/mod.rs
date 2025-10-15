@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::database::Database;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -256,9 +256,9 @@ impl Journal {
 
     pub fn list_entries_filtered(
         &self,
-        date: Option<&str>,
-        since: Option<&str>,
-        until: Option<&str>,
+        date: Option<&NaiveDate>,
+        since: Option<&NaiveDate>,
+        until: Option<&NaiveDate>,
         journal: Option<&str>,
     ) -> Result<Vec<Entry>> {
         self.list_entries_filtered_with_order(date, since, until, journal, "created_at", "DESC")
@@ -266,9 +266,9 @@ impl Journal {
 
     pub fn list_entries_filtered_with_order(
         &self,
-        date: Option<&str>,
-        since: Option<&str>,
-        until: Option<&str>,
+        date: Option<&NaiveDate>,
+        since: Option<&NaiveDate>,
+        until: Option<&NaiveDate>,
         journal: Option<&str>,
         order_field: &str,
         order_direction: &str,
@@ -278,23 +278,17 @@ impl Journal {
         let mut conditions = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        if let Some(date_str) = date {
-            let date = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                .map_err(|_| anyhow::anyhow!("Invalid date format. Use YYYY-MM-DD"))?;
+        if let Some(date) = date {
             conditions.push("DATE(timestamp) = ?");
             params.push(Box::new(date.to_string()));
         }
 
-        if let Some(since_str) = since {
-            let since_date = chrono::NaiveDate::parse_from_str(since_str, "%Y-%m-%d")
-                .map_err(|_| anyhow::anyhow!("Invalid since date format. Use YYYY-MM-DD"))?;
+        if let Some(since_date) = since {
             conditions.push("DATE(timestamp) >= ?");
             params.push(Box::new(since_date.to_string()));
         }
 
-        if let Some(until_str) = until {
-            let until_date = chrono::NaiveDate::parse_from_str(until_str, "%Y-%m-%d")
-                .map_err(|_| anyhow::anyhow!("Invalid until date format. Use YYYY-MM-DD"))?;
+        if let Some(until_date) = until {
             conditions.push("DATE(timestamp) <= ?");
             params.push(Box::new(until_date.to_string()));
         }
