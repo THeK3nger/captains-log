@@ -72,11 +72,14 @@ pub enum Commands {
         id: i64,
     },
 
-    /// Create a new entry using external editor
+    /// Create a new entry
     New {
         /// Journal category for the new entry
         #[arg(long)]
         journal: Option<String>,
+
+        /// Quick entry content (if provided, creates entry directly without opening editor)
+        content: Vec<String>,
     },
 
     /// Display calendar view of entries
@@ -159,31 +162,36 @@ pub fn handle_command(
             let journal_filter = list_journal.as_deref().or(global_journal);
 
             // Parse date filters using .map().transpose() pattern
-            let date_filter = date.as_deref()
+            let date_filter = date
+                .as_deref()
                 .map(parse_relative_date)
                 .transpose()
                 .map_err(|e| anyhow::anyhow!("Invalid date: {}", e))?;
-            let since_filter = since.as_deref()
+            let since_filter = since
+                .as_deref()
                 .map(parse_relative_date)
                 .transpose()
                 .map_err(|e| anyhow::anyhow!("Invalid since date: {}", e))?;
-            let until_filter = until.as_deref()
+            let until_filter = until
+                .as_deref()
                 .map(parse_relative_date)
                 .transpose()
                 .map_err(|e| anyhow::anyhow!("Invalid until date: {}", e))?;
 
-            let entries =
-                if date_filter.is_some() || since_filter.is_some() || until_filter.is_some() || journal_filter.is_some()
-                {
-                    journal.list_entries_filtered(
-                        date_filter.as_ref(),
-                        since_filter.as_ref(),
-                        until_filter.as_ref(),
-                        journal_filter,
-                    )?
-                } else {
-                    journal.list_entries()?
-                };
+            let entries = if date_filter.is_some()
+                || since_filter.is_some()
+                || until_filter.is_some()
+                || journal_filter.is_some()
+            {
+                journal.list_entries_filtered(
+                    date_filter.as_ref(),
+                    since_filter.as_ref(),
+                    until_filter.as_ref(),
+                    journal_filter,
+                )?
+            } else {
+                journal.list_entries()?
+            };
 
             if entries.is_empty() {
                 println!("{}", "No entries found".yellow());
@@ -295,11 +303,24 @@ pub fn handle_command(
         }
         Commands::New {
             journal: new_journal,
+            content,
         } => {
             let journal_category = new_journal.as_deref().or(global_journal);
-            new_entry(journal, journal_category, config)?;
+            if content.is_empty() {
+                // No content provided - open editor
+                new_entry(journal, journal_category, config)?;
+            } else {
+                // Content provided - create entry directly
+                let entry_content = content.join(" ");
+                let id = journal.create_entry(None, &entry_content, journal_category)?;
+                println!("{}", format!("Entry {} added successfully", id).green());
+            }
         }
-        Commands::Calendar { year, month, journal: calendar_journal } => {
+        Commands::Calendar {
+            year,
+            month,
+            journal: calendar_journal,
+        } => {
             let journal_filter = calendar_journal.as_deref().or(global_journal);
             show_calendar(journal, year, month, journal_filter, config)?;
         }
