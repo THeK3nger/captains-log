@@ -318,18 +318,33 @@ impl Journal {
     }
 
     pub fn list_entries_for_month(&self, year: i32, month: u32) -> Result<Vec<Entry>> {
+        self.list_entries_for_month_filtered(year, month, None)
+    }
+
+    pub fn list_entries_for_month_filtered(
+        &self,
+        year: i32,
+        month: u32,
+        journal: Option<&str>,
+    ) -> Result<Vec<Entry>> {
         let conn = self.db.connection();
 
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    journal, created_at, updated_at
-             FROM entries
-             WHERE strftime('%Y', timestamp) = ?1 AND strftime('%m', timestamp) = ?2
-             ORDER BY timestamp ASC",
-        )?;
+        let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries WHERE strftime('%Y', timestamp) = ?1 AND strftime('%m', timestamp) = ?2".to_string();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![
+            Box::new(year.to_string()),
+            Box::new(format!("{:02}", month)),
+        ];
 
-        let month_str = format!("{:02}", month);
-        let entry_iter = stmt.query_map([year.to_string(), month_str], Entry::from_row)?;
+        if let Some(journal_str) = journal {
+            query.push_str(" AND journal = ?");
+            params.push(Box::new(journal_str.to_string()));
+        }
+
+        query.push_str(" ORDER BY timestamp ASC");
+
+        let mut stmt = conn.prepare(&query)?;
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let entry_iter = stmt.query_map(param_refs.as_slice(), Entry::from_row)?;
 
         let mut entries = Vec::new();
         for entry in entry_iter {

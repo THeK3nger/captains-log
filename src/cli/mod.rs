@@ -88,6 +88,10 @@ pub enum Commands {
         /// Month to display (1-12, default: current month)
         #[arg(long)]
         month: Option<u32>,
+
+        /// Filter by journal category
+        #[arg(long)]
+        journal: Option<String>,
     },
 
     /// Manage configuration
@@ -295,8 +299,9 @@ pub fn handle_command(
             let journal_category = new_journal.as_deref().or(global_journal);
             new_entry(journal, journal_category, config)?;
         }
-        Commands::Calendar { year, month } => {
-            show_calendar(journal, year, month, config)?;
+        Commands::Calendar { year, month, journal: calendar_journal } => {
+            let journal_filter = calendar_journal.as_deref().or(global_journal);
+            show_calendar(journal, year, month, journal_filter, config)?;
         }
         Commands::Config { action } => {
             handle_config_command(action, config)?;
@@ -792,6 +797,7 @@ fn show_calendar(
     journal: &Journal,
     year: Option<i32>,
     month: Option<u32>,
+    journal_filter: Option<&str>,
     config: &Config,
 ) -> Result<()> {
     let now = Local::now();
@@ -804,7 +810,7 @@ fn show_calendar(
     }
 
     // Get entries for the month
-    let entries = journal.list_entries_for_month(year, month)?;
+    let entries = journal.list_entries_for_month_filtered(year, month, journal_filter)?;
 
     // Create a map of day -> entry count
     let mut day_counts = std::collections::HashMap::new();
