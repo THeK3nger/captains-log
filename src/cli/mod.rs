@@ -8,6 +8,7 @@ use crate::cli::frontmatter::{format_entry_with_frontmatter, parse_frontmatter};
 use crate::cli::stardate::Stardate;
 use crate::config::Config;
 use crate::export::{ExportFilters, Exporter};
+use crate::import::Importer;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
@@ -126,6 +127,24 @@ pub enum Commands {
         until: Option<String>,
 
         /// Filter by journal category
+        #[arg(long)]
+        journal: Option<String>,
+    },
+
+    /// Import entries from various formats
+    Import {
+        /// Path to file to import
+        path: String,
+
+        /// Import format (currently only org is supported)
+        #[arg(short, long, default_value = "org")]
+        format: String,
+
+        /// Filter by specific date (YYYY-MM-DD) - only import entries from this date
+        #[arg(long)]
+        date: Option<String>,
+
+        /// Target journal category for imported entries
         #[arg(long)]
         journal: Option<String>,
     },
@@ -345,6 +364,20 @@ pub fn handle_command(
                 export_journal.or_else(|| global_journal.map(|s| s.to_string())),
             )?;
         }
+        Commands::Import {
+            path,
+            format,
+            date,
+            journal: import_journal,
+        } => {
+            handle_import_command(
+                journal,
+                &path,
+                &format,
+                date,
+                import_journal.or_else(|| global_journal.map(|s| s.to_string())),
+            )?;
+        }
     }
 
     Ok(())
@@ -423,6 +456,61 @@ where
         );
     } else {
         println!("{}", "Entries exported successfully to stdout".green());
+    }
+
+    Ok(())
+}
+
+fn handle_import_command(
+    journal: &Journal,
+    file_path: &str,
+    format: &str,
+    date: Option<String>,
+    journal_category: Option<String>,
+) -> Result<()> {
+    // Parse date filter if provided
+    let filter_date = date
+        .as_deref()
+        .map(parse_relative_date)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Invalid date filter: {}", e))?;
+
+    let importer = Importer::new(journal);
+
+    match format.to_lowercase().as_str() {
+        "org" => {
+            println!("{}", format!("Importing from {}...", file_path).cyan());
+
+            let stats = importer.import_from_org(
+                file_path,
+                journal_category.as_deref(),
+                filter_date,
+            )?;
+
+            // Display results
+            println!();
+            println!("{}", "Import completed!".green().bold());
+            println!("  Total entries found: {}", stats.total);
+            println!("  Successfully imported: {}", stats.imported.to_string().green());
+
+            if stats.skipped > 0 {
+                println!("  Skipped: {}", stats.skipped.to_string().yellow());
+            }
+
+            if !stats.errors.is_empty() {
+                println!();
+                println!("{}", "Errors encountered:".red().bold());
+                for error in &stats.errors {
+                    println!("  - {}", error.red());
+                }
+            }
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported import format '{}'. Currently supported formats: org",
+                format
+            ));
+        }
     }
 
     Ok(())

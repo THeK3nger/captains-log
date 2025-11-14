@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod database;
 mod export;
+mod import;
 mod journal;
 
 use cli::Commands;

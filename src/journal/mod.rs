@@ -112,6 +112,29 @@ impl Journal {
         Ok(conn.last_insert_rowid())
     }
 
+    pub fn create_entry_with_timestamp(
+        &self,
+        title: Option<&str>,
+        content: &str,
+        journal: Option<&str>,
+        timestamp: chrono::NaiveDateTime,
+    ) -> Result<i64> {
+        let conn = self.db.connection();
+        let now = Utc::now();
+        let journal_name = journal.unwrap_or("Personal");
+
+        // Convert NaiveDateTime to DateTime<Utc>
+        let timestamp_utc = DateTime::<Utc>::from_naive_utc_and_offset(timestamp, Utc);
+
+        conn.execute(
+            "INSERT INTO entries (timestamp, title, content, journal, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![timestamp_utc, title, content, journal_name, now, now],
+        )?;
+
+        Ok(conn.last_insert_rowid())
+    }
+
     pub fn get_entry(&self, id: i64) -> Result<Option<Entry>> {
         let conn = self.db.connection();
 
