@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "version": "1.0"
+  },
+  "entries": [
+    {
+      "uuid": "8CA6A9393E894A6AB17D9FDF5EDC5401",
+      "creationDate": "2025-11-05T07:24:50Z",
+      "modifiedDate": "2025-11-10T11:46:17Z",
+      "text": "Trascinato giorno dopo giorno dalla continua progressione degli eventi.\nSvegliarsi e essere già in ritardo, e allo stesso tempo sentire di perdere il tempo.\n\nCerco la routine e nella routine perdo me stesso.\n\nI pensieri poi, sono scomposti. Saltano di fronda in fronda. Senza una logica.",
+      "richText": "{\"contents\":[{\"attributes\":{\"line\":{\"header\":1}},\"text\":\"Trascinato giorno dopo giorno dalla continua progressione degli eventi.\\n\"},{\"text\":\"Svegliarsi e essere già in ritardo.\"}]}",
+      "starred": false,
+      "isPinned": false
+    },
+    {
+      "uuid": "69D7CBE76C0044708C465644FA361B88",
+      "creationDate": "2025-11-06T07:07:17Z",
+      "modifiedDate": "2025-11-10T11:50:05Z",
+      "text": "Si prova a mantenere un po' d'ordine mentale in questi giorni.\nNon eccello. Ancora una volta l'intenzione di calma attende più della calma.\n\nL'idea di essere X è sempre più dolce e facile dello essere X.",
+      "richText": "{\"contents\":[{\"attributes\":{\"line\":{\"header\":1}},\"text\":\"Si prova a mantenere un po' d'ordine mentale in questi giorni.\\n\"},{\"text\":\"Non eccello.\"}]}",
+      "starred": false,
+      "isPinned": false
+    }
+  ]
+}

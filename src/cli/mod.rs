@@ -136,7 +136,7 @@ pub enum Commands {
         /// Path to file to import
         path: String,
 
-        /// Import format (currently only org is supported)
+        /// Import format (supported formats: org, dayone)
         #[arg(short, long, default_value = "org")]
         format: String,
 
@@ -510,9 +510,41 @@ fn handle_import_command(
                 }
             }
         }
+        "dayone" => {
+            println!(
+                "{} {}",
+                "[EXPERIMENTAL]".yellow(),
+                "DayOne JSON import is still experimental."
+            );
+            println!("{}", format!("Importing from {}...", file_path).cyan());
+
+            let stats =
+                importer.import_from_dayone(file_path, journal_category.as_deref(), filter_date)?;
+
+            // Display results
+            println!();
+            println!("{}", "Import completed!".green().bold());
+            println!("  Total entries found: {}", stats.total);
+            println!(
+                "  Successfully imported: {}",
+                stats.imported.to_string().green()
+            );
+
+            if stats.skipped > 0 {
+                println!("  Skipped: {}", stats.skipped.to_string().yellow());
+            }
+
+            if !stats.errors.is_empty() {
+                println!();
+                println!("{}", "Errors encountered:".red().bold());
+                for error in &stats.errors {
+                    println!("  - {}", error.red());
+                }
+            }
+        }
         _ => {
             return Err(anyhow::anyhow!(
-                "Unsupported import format '{}'. Currently supported formats: org",
+                "Unsupported import format '{}'. Currently supported formats: org, dayone",
                 format
             ));
         }

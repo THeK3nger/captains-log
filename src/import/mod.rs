@@ -1,6 +1,7 @@
 use crate::journal::Journal;
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, NaiveDateTime};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
@@ -24,6 +25,46 @@ impl<'a> Importer<'a> {
             fs::read_to_string(file_path).context(format!("Failed to read file: {}", file_path))?;
 
         let entries = parse_org_journal(&content, filter_date)?;
+
+        let mut stats = ImportStats {
+            total: entries.len(),
+            imported: 0,
+            skipped: 0,
+            errors: Vec::new(),
+        };
+
+        for entry in entries {
+            match self.journal.create_entry_with_timestamp(
+                entry.title.as_deref(),
+                &entry.content,
+                journal_category,
+                entry.timestamp,
+            ) {
+                Ok(_) => stats.imported += 1,
+                Err(e) => {
+                    stats.errors.push(format!(
+                        "Failed to import entry at {}: {}",
+                        entry.timestamp, e
+                    ));
+                    stats.skipped += 1;
+                }
+            }
+        }
+
+        Ok(stats)
+    }
+
+    /// Import entries from a DayOne JSON export file
+    pub fn import_from_dayone(
+        &self,
+        file_path: &str,
+        journal_category: Option<&str>,
+        filter_date: Option<NaiveDate>,
+    ) -> Result<ImportStats> {
+        let content =
+            fs::read_to_string(file_path).context(format!("Failed to read file: {}", file_path))?;
+
+        let entries = parse_dayone_json(&content, filter_date)?;
 
         let mut stats = ImportStats {
             total: entries.len(),
@@ -330,6 +371,123 @@ fn convert_org_links(text: &str) -> String {
     }
 
     result
+}
+
+// DayOne JSON import structures and functions
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DayOneExport {
+    metadata: DayOneMetadata,
+    entries: Vec<DayOneEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DayOneMetadata {
+    version: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DayOneEntry {
+    uuid: String,
+    creation_date: String,
+    modified_date: Option<String>,
+    text: String,
+    rich_text: Option<String>,
+    #[serde(default)]
+    starred: bool,
+    #[serde(default)]
+    is_pinned: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct RichTextContent {
+    contents: Vec<RichTextBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RichTextBlock {
+    text: String,
+    attributes: Option<RichTextAttributes>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RichTextAttributes {
+    line: Option<LineAttributes>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LineAttributes {
+    header: Option<u32>,
+}
+
+/// Parse a DayOne JSON export file and extract entries
+fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Vec<ParsedEntry>> {
+    let export: DayOneExport =
+        serde_json::from_str(content).context("Failed to parse DayOne JSON file")?;
+
+    let mut entries = Vec::new();
+
+    for dayone_entry in export.entries {
+        // Parse timestamp from ISO 8601 format
+        let timestamp = chrono::DateTime::parse_from_rfc3339(&dayone_entry.creation_date)
+            .context(format!(
+                "Failed to parse creation date: {}",
+                dayone_entry.creation_date
+            ))?
+            .naive_utc();
+
+        // Skip if filter_date is set and doesn't match
+        if let Some(filter) = filter_date {
+            if timestamp.date() != filter {
+                continue;
+            }
+        }
+
+        // Try to extract title from richText if available
+        let title = if let Some(rich_text_str) = &dayone_entry.rich_text {
+            extract_title_from_rich_text(rich_text_str)
+        } else {
+            None
+        };
+
+        // Use the text field as content (it's already plain text)
+        let content = dayone_entry.text.trim().to_string();
+
+        // Skip empty entries
+        if content.is_empty() && title.is_none() {
+            continue;
+        }
+
+        entries.push(ParsedEntry {
+            timestamp,
+            title,
+            content,
+        });
+    }
+
+    Ok(entries)
+}
+
+/// Extract title from DayOne richText JSON
+/// The first block with a header attribute is considered the title
+fn extract_title_from_rich_text(rich_text_str: &str) -> Option<String> {
+    if let Ok(rich_text) = serde_json::from_str::<RichTextContent>(rich_text_str) {
+        for block in &rich_text.contents {
+            if let Some(attributes) = &block.attributes {
+                if let Some(line_attrs) = &attributes.line {
+                    if line_attrs.header.is_some() {
+                        // Found a header line, use its text as the title
+                        let title = block.text.trim().trim_end_matches('\n');
+                        if !title.is_empty() {
+                            return Some(title.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
