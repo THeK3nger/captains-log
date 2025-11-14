@@ -20,8 +20,8 @@ impl<'a> Importer<'a> {
         journal_category: Option<&str>,
         filter_date: Option<NaiveDate>,
     ) -> Result<ImportStats> {
-        let content = fs::read_to_string(file_path)
-            .context(format!("Failed to read file: {}", file_path))?;
+        let content =
+            fs::read_to_string(file_path).context(format!("Failed to read file: {}", file_path))?;
 
         let entries = parse_org_journal(&content, filter_date)?;
 
@@ -216,10 +216,7 @@ fn convert_org_to_markdown(org: &str) -> String {
         // Handle code blocks
         if trimmed.starts_with("#+BEGIN_SRC") {
             in_src_block = true;
-            let lang = trimmed
-                .strip_prefix("#+BEGIN_SRC")
-                .unwrap_or("")
-                .trim();
+            let lang = trimmed.strip_prefix("#+BEGIN_SRC").unwrap_or("").trim();
             result.push_str(&format!("```{}\n", lang));
             continue;
         }
