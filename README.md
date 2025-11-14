@@ -11,6 +11,7 @@ Logs are stored in a SQLite database.
 - **Export Options**: Export your logs to various formats including ORG, Markdown, or JSON (more are coming).
 - **Search Functionality**: Quickly find past entries using keywords or dates.
 - **Stardate Mode**: Of course, I can render dates in _pseudo-Stardate_ format for that authentic _Star Trek_ feel.
+- **Import**: I added some random importers (from now it supports `org-jorunal` and DayOne)
 
 ### Planned Features
 
