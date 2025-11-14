@@ -479,19 +479,24 @@ fn handle_import_command(
 
     match format.to_lowercase().as_str() {
         "org" => {
+            println!(
+                "{} {}",
+                "[EXPERIMENTAL]".yellow(),
+                "org-journal import is still very VERY experimental."
+            );
             println!("{}", format!("Importing from {}...", file_path).cyan());
 
-            let stats = importer.import_from_org(
-                file_path,
-                journal_category.as_deref(),
-                filter_date,
-            )?;
+            let stats =
+                importer.import_from_org(file_path, journal_category.as_deref(), filter_date)?;
 
             // Display results
             println!();
             println!("{}", "Import completed!".green().bold());
             println!("  Total entries found: {}", stats.total);
-            println!("  Successfully imported: {}", stats.imported.to_string().green());
+            println!(
+                "  Successfully imported: {}",
+                stats.imported.to_string().green()
+            );
 
             if stats.skipped > 0 {
                 println!("  Skipped: {}", stats.skipped.to_string().yellow());
