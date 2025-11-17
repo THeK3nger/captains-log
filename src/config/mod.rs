@@ -103,7 +103,17 @@ impl Config {
         }
     }
 
-    pub fn get_editor_command(&self) -> String {
+    pub fn get_editor_command(&self) -> &str {
+        if let Some(command) = &self.editor.command {
+            command.as_str()
+        } else {
+            // For environment variable, we need to check at runtime
+            // Return a default that can be overridden
+            "vim"
+        }
+    }
+    
+    pub fn get_editor_command_or_env(&self) -> String {
         if let Some(command) = &self.editor.command {
             command.clone()
         } else {

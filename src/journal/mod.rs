@@ -174,12 +174,8 @@ impl Journal {
         let mut stmt = conn.prepare(&query)?;
         let entry_iter = stmt.query_map([], Entry::from_row)?;
 
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
-        }
-
-        Ok(entries)
+        // Collect into a vector more efficiently
+        entry_iter.collect::<rusqlite::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn search_entries(&self, query: &str) -> Result<Vec<Entry>> {
@@ -196,12 +192,8 @@ impl Journal {
 
         let entry_iter = stmt.query_map([&search_pattern], Entry::from_row)?;
 
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
-        }
-
-        Ok(entries)
+        // Collect into a vector more efficiently
+        entry_iter.collect::<rusqlite::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn delete_entry(&self, id: i64) -> Result<bool> {
@@ -299,26 +291,35 @@ impl Journal {
         let conn = self.db.connection();
         let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries".to_string();
         let mut conditions = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        
+        // Store the string conversions to maintain lifetime
+        let date_str = date.map(|d| d.to_string());
+        let since_str = since.map(|d| d.to_string());
+        let until_str = until.map(|d| d.to_string());
+        // Convert journal Option<&str> to Option<String> to avoid lifetime issues
+        let journal_str = journal.map(|s| s.to_string());
+        
+        // Build parameter list
+        let mut params: Vec<&dyn rusqlite::ToSql> = Vec::new();
 
-        if let Some(date) = date {
+        if let Some(ref s) = date_str {
             conditions.push("DATE(timestamp) = ?");
-            params.push(Box::new(date.to_string()));
+            params.push(s);
         }
 
-        if let Some(since_date) = since {
+        if let Some(ref s) = since_str {
             conditions.push("DATE(timestamp) >= ?");
-            params.push(Box::new(since_date.to_string()));
+            params.push(s);
         }
 
-        if let Some(until_date) = until {
+        if let Some(ref s) = until_str {
             conditions.push("DATE(timestamp) <= ?");
-            params.push(Box::new(until_date.to_string()));
+            params.push(s);
         }
 
-        if let Some(journal_str) = journal {
+        if let Some(ref s) = journal_str {
             conditions.push("journal = ?");
-            params.push(Box::new(journal_str.to_string()));
+            params.push(s);
         }
 
         if !conditions.is_empty() {
@@ -329,15 +330,10 @@ impl Journal {
         query.push_str(&format!(" ORDER BY {} {}", order_field, order_direction));
 
         let mut stmt = conn.prepare(&query)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let entry_iter = stmt.query_map(param_refs.as_slice(), Entry::from_row)?;
+        let entry_iter = stmt.query_map(params.as_slice(), Entry::from_row)?;
 
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
-        }
-
-        Ok(entries)
+        // Collect into a vector more efficiently
+        entry_iter.collect::<rusqlite::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn list_entries_for_month(&self, year: i32, month: u32) -> Result<Vec<Entry>> {
@@ -353,27 +349,25 @@ impl Journal {
         let conn = self.db.connection();
 
         let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries WHERE strftime('%Y', timestamp) = ?1 AND strftime('%m', timestamp) = ?2".to_string();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![
-            Box::new(year.to_string()),
-            Box::new(format!("{:02}", month)),
-        ];
+        
+        // Store string conversions to maintain lifetime
+        let year_str = year.to_string();
+        let month_str = format!("{:02}", month);
+        let journal_str = journal.map(|s| s.to_string());
+        
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&year_str, &month_str];
 
-        if let Some(journal_str) = journal {
+        if let Some(ref s) = journal_str {
             query.push_str(" AND journal = ?");
-            params.push(Box::new(journal_str.to_string()));
+            params.push(s);
         }
 
         query.push_str(" ORDER BY timestamp ASC");
 
         let mut stmt = conn.prepare(&query)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let entry_iter = stmt.query_map(param_refs.as_slice(), Entry::from_row)?;
+        let entry_iter = stmt.query_map(params.as_slice(), Entry::from_row)?;
 
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
-        }
-
-        Ok(entries)
+        // Collect into a vector more efficiently
+        entry_iter.collect::<rusqlite::Result<Vec<_>, _>>().map_err(Into::into)
     }
 }

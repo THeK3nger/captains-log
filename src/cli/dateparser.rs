@@ -76,19 +76,17 @@ pub fn parse_relative_date(input: &str) -> Result<NaiveDate, String> {
         // Days ago/from now
         s if s.ends_with("days ago") || s.ends_with("day ago") => {
             let parts: Vec<&str> = s.split_whitespace().collect();
-            if let Some(num_str) = parts.first() {
-                if let Ok(days) = num_str.parse::<i64>() {
-                    return Ok(today - Duration::days(days));
-                }
+            if let Some(num_str) = parts.first()
+                && let Ok(days) = num_str.parse::<i64>() {
+                return Ok(today - Duration::days(days));
             }
             Err(format!("Could not parse: {}", input))
         }
         s if s.ends_with("days from now") || s.ends_with("day from now") => {
             let parts: Vec<&str> = s.split_whitespace().collect();
-            if let Some(num_str) = parts.first() {
-                if let Ok(days) = num_str.parse::<i64>() {
-                    return Ok(today + Duration::days(days));
-                }
+            if let Some(num_str) = parts.first()
+                && let Ok(days) = num_str.parse::<i64>() {
+                return Ok(today + Duration::days(days));
             }
             Err(format!("Could not parse: {}", input))
         }
@@ -96,19 +94,17 @@ pub fn parse_relative_date(input: &str) -> Result<NaiveDate, String> {
         // Weeks ago/from now
         s if s.ends_with("weeks ago") || s.ends_with("week ago") => {
             let parts: Vec<&str> = s.split_whitespace().collect();
-            if let Some(num_str) = parts.first() {
-                if let Ok(weeks) = num_str.parse::<i64>() {
-                    return Ok(today - Duration::weeks(weeks));
-                }
+            if let Some(num_str) = parts.first()
+                && let Ok(weeks) = num_str.parse::<i64>() {
+                return Ok(today - Duration::weeks(weeks));
             }
             Err(format!("Could not parse: {}", input))
         }
         s if s.ends_with("weeks from now") || s.ends_with("week from now") => {
             let parts: Vec<&str> = s.split_whitespace().collect();
-            if let Some(num_str) = parts.first() {
-                if let Ok(weeks) = num_str.parse::<i64>() {
-                    return Ok(today + Duration::weeks(weeks));
-                }
+            if let Some(num_str) = parts.first()
+                && let Ok(weeks) = num_str.parse::<i64>() {
+                return Ok(today + Duration::weeks(weeks));
             }
             Err(format!("Could not parse: {}", input))
         }

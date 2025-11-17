@@ -59,6 +59,12 @@ impl Database {
             [],
         )?;
 
+        // Index on journal field for filtering by journal category
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entries_journal ON entries(journal)",
+            [],
+        )?;
+
         Ok(())
     }
 

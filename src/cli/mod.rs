@@ -397,22 +397,13 @@ fn handle_export_command(
 
     match format.to_lowercase().as_str() {
         "json" => {
-            export_with_success_message(
-                || exporter.export_to_json(output_path.clone(), filters),
-                &output_path,
-            )?;
+            exporter.export_to_json(output_path.as_ref().cloned(), filters)?;
         }
         "md" | "markdown" => {
-            export_with_success_message(
-                || exporter.export_to_markdown(output_path.clone(), filters),
-                &output_path,
-            )?;
+            exporter.export_to_markdown(output_path.as_ref().cloned(), filters)?;
         }
         "org" => {
-            export_with_success_message(
-                || exporter.export_to_org(output_path.clone(), filters),
-                &output_path,
-            )?;
+            exporter.export_to_org(output_path.as_ref().cloned(), filters)?;
         }
         _ => {
             return Err(anyhow::anyhow!(
@@ -420,6 +411,16 @@ fn handle_export_command(
                 format
             ));
         }
+    }
+
+    // Print success message
+    if let Some(path) = &output_path {
+        println!(
+            "{}",
+            format!("Entries exported successfully to {}", path).green()
+        );
+    } else {
+        println!("{}", "Entries exported successfully to stdout".green());
     }
 
     Ok(())
@@ -441,24 +442,6 @@ fn create_export_filters(
     } else {
         None
     }
-}
-
-fn export_with_success_message<F>(export_fn: F, output_path: &Option<String>) -> Result<()>
-where
-    F: FnOnce() -> Result<()>,
-{
-    export_fn()?;
-
-    if let Some(path) = output_path {
-        println!(
-            "{}",
-            format!("Entries exported successfully to {}", path).green()
-        );
-    } else {
-        println!("{}", "Entries exported successfully to stdout".green());
-    }
-
-    Ok(())
 }
 
 fn handle_import_command(
@@ -786,7 +769,7 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
     fs::write(&temp_file, template_content)?;
 
     // Get editor from config
-    let editor = config.get_editor_command();
+    let editor = config.get_editor_command_or_env();
 
     // Open editor
     let status = Command::new(&editor)
@@ -873,7 +856,7 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     fs::write(&temp_file, content_with_frontmatter)?;
 
     // Get editor from config
-    let editor = config.get_editor_command();
+    let editor = config.get_editor_command_or_env();
 
     // Open editor
     let status = Command::new(&editor)

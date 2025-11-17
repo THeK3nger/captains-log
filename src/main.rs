@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
-use colored::*;
 
 mod cli;
 mod config;

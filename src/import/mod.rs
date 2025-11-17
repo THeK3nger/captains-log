@@ -3,7 +3,6 @@ use anyhow::{Context, Result};
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
 
 pub struct Importer<'a> {
     journal: &'a Journal,
@@ -142,11 +141,10 @@ fn parse_org_journal(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
         if line.starts_with("** ") {
             if let Some(date) = current_date {
                 // Skip if filter_date is set and doesn't match
-                if let Some(filter) = filter_date {
-                    if date != filter {
-                        i += 1;
-                        continue;
-                    }
+                if let Some(filter) = filter_date
+                    && date != filter {
+                    i += 1;
+                    continue;
                 }
 
                 let entry_header = line.strip_prefix("** ").unwrap().trim();
@@ -195,14 +193,13 @@ fn parse_org_date_header(date_str: &str) -> Option<NaiveDate> {
         let date_part = date_part.trim();
         // Parse "07/09/2025" format (DD/MM/YYYY)
         let parts: Vec<&str> = date_part.split('/').collect();
-        if parts.len() == 3 {
-            if let (Ok(day), Ok(month), Ok(year)) = (
+        if parts.len() == 3
+            && let (Ok(day), Ok(month), Ok(year)) = (
                 parts[0].parse::<u32>(),
                 parts[1].parse::<u32>(),
                 parts[2].parse::<i32>(),
             ) {
-                return NaiveDate::from_ymd_opt(year, month, day);
-            }
+            return NaiveDate::from_ymd_opt(year, month, day);
         }
     }
     None
@@ -235,10 +232,9 @@ fn parse_entry_header(header: &str) -> (Option<&str>, Option<String>) {
 fn parse_timestamp(date: NaiveDate, time_str: Option<&str>) -> Option<NaiveDateTime> {
     if let Some(time) = time_str {
         let parts: Vec<&str> = time.split(':').collect();
-        if parts.len() >= 2 {
-            if let (Ok(hour), Ok(minute)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                return date.and_hms_opt(hour, minute, 0);
-            }
+        if parts.len() >= 2
+            && let (Ok(hour), Ok(minute)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+            return date.and_hms_opt(hour, minute, 0);
         }
     }
     None
@@ -324,10 +320,9 @@ fn convert_org_to_markdown(org: &str) -> String {
 /// Convert delimiter-based formatting (helper for org to markdown conversion)
 fn convert_delimiter(text: &str, from_delim: char, to_delim: char) -> String {
     let mut result = String::new();
-    let mut chars = text.chars().peekable();
     let mut in_delimiter = false;
 
-    while let Some(c) = chars.next() {
+    for c in text.chars() {
         if c == from_delim {
             if in_delimiter {
                 result.push(to_delim);
@@ -438,10 +433,9 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
             .naive_utc();
 
         // Skip if filter_date is set and doesn't match
-        if let Some(filter) = filter_date {
-            if timestamp.date() != filter {
-                continue;
-            }
+        if let Some(filter) = filter_date
+            && timestamp.date() != filter {
+            continue;
         }
 
         // Try to extract title from richText if available
@@ -474,15 +468,13 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
 fn extract_title_from_rich_text(rich_text_str: &str) -> Option<String> {
     if let Ok(rich_text) = serde_json::from_str::<RichTextContent>(rich_text_str) {
         for block in &rich_text.contents {
-            if let Some(attributes) = &block.attributes {
-                if let Some(line_attrs) = &attributes.line {
-                    if line_attrs.header.is_some() {
-                        // Found a header line, use its text as the title
-                        let title = block.text.trim().trim_end_matches('\n');
-                        if !title.is_empty() {
-                            return Some(title.to_string());
-                        }
-                    }
+            if let Some(attributes) = &block.attributes
+                && let Some(line_attrs) = &attributes.line
+                && line_attrs.header.is_some() {
+                // Found a header line, use its text as the title
+                let title = block.text.trim().trim_end_matches('\n');
+                if !title.is_empty() {
+                    return Some(title.to_string());
                 }
             }
         }
