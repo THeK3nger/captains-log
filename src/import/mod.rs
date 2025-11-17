@@ -138,45 +138,44 @@ fn parse_org_journal(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
         }
 
         // Parse entry header (e.g., "** 14:30 My Title")
-        if line.starts_with("** ") {
-            if let Some(date) = current_date {
-                // Skip if filter_date is set and doesn't match
-                if let Some(filter) = filter_date
-                    && date != filter {
-                    i += 1;
-                    continue;
-                }
+        if line.starts_with("** ")
+            && let Some(date) = current_date {
+            // Skip if filter_date is set and doesn't match
+            if let Some(filter) = filter_date
+                && date != filter {
+                i += 1;
+                continue;
+            }
 
-                let entry_header = line.strip_prefix("** ").unwrap().trim();
-                let (time_str, title) = parse_entry_header(entry_header);
+            let entry_header = line.strip_prefix("** ").unwrap().trim();
+            let (time_str, title) = parse_entry_header(entry_header);
 
-                // Parse timestamp
-                if let Some(timestamp) = parse_timestamp(date, time_str) {
-                    // Collect entry content until next entry or date header
-                    i += 1;
-                    let mut content_lines = Vec::new();
-                    while i < lines.len() {
-                        let content_line = lines[i];
-                        if content_line.trim().starts_with("**")
-                            || (content_line.trim().starts_with("* ")
-                                && !content_line.trim().starts_with("** "))
-                        {
-                            break;
-                        }
-                        content_lines.push(content_line);
-                        i += 1;
+            // Parse timestamp
+            if let Some(timestamp) = parse_timestamp(date, time_str) {
+                // Collect entry content until next entry or date header
+                i += 1;
+                let mut content_lines = Vec::new();
+                while i < lines.len() {
+                    let content_line = lines[i];
+                    if content_line.trim().starts_with("**")
+                        || (content_line.trim().starts_with("* ")
+                            && !content_line.trim().starts_with("** "))
+                    {
+                        break;
                     }
-
-                    let content = content_lines.join("\n").trim().to_string();
-                    let markdown_content = convert_org_to_markdown(&content);
-
-                    entries.push(ParsedEntry {
-                        timestamp,
-                        title,
-                        content: markdown_content,
-                    });
-                    continue;
+                    content_lines.push(content_line);
+                    i += 1;
                 }
+
+                let content = content_lines.join("\n").trim().to_string();
+                let markdown_content = convert_org_to_markdown(&content);
+
+                entries.push(ParsedEntry {
+                    timestamp,
+                    title,
+                    content: markdown_content,
+                });
+                continue;
             }
         }
 
