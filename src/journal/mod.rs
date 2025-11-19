@@ -154,7 +154,7 @@ impl Journal {
     }
 
     pub fn list_entries(&self) -> Result<Vec<Entry>> {
-        self.list_entries_with_order("created_at", "DESC")
+        self.list_entries_with_order("timestamp", "DESC")
     }
 
     pub fn list_entries_with_order(
@@ -284,7 +284,7 @@ impl Journal {
         until: Option<&NaiveDate>,
         journal: Option<&str>,
     ) -> Result<Vec<Entry>> {
-        self.list_entries_filtered_with_order(date, since, until, journal, "created_at", "DESC")
+        self.list_entries_filtered_with_order(date, since, until, journal, "timestamp", "DESC")
     }
 
     pub fn list_entries_filtered_with_order(
