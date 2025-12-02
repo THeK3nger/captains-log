@@ -18,6 +18,10 @@ pulldown-cmark = "0.13.0"
 regex = "1.11"
 terminal_size = "0.4.3"
 textwrap = { version = "0.16", features = ["unicode-width"] }
+rand = "0.8"
+which = "6.0"
+signal-hook = "0.3"
+libc = "0.2"
 
 [[bin]]
 name = "cl"

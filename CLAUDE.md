@@ -101,6 +101,13 @@ cargo build
 ./target/debug/cl import file.org --format org --journal Work
 ./target/debug/cl import file.org --format org --date 2025-09-09
 
+# Audio recording and playback
+./target/debug/cl record
+./target/debug/cl record --journal Work
+./target/debug/cl record --no-transcribe
+./target/debug/cl record --max-duration 300
+./target/debug/cl play <id>
+
 # Override database location (global parameter for any command)
 ./target/debug/cl -d "path/to/custom.db" new "Entry with custom database"
 ./target/debug/cl --database "/tmp/temp.db" list
@@ -126,6 +133,13 @@ cargo fmt
 ```
 src/
 ├── main.rs              # CLI entry point and argument parsing
+├── audio/
+│   ├── mod.rs           # Audio module root and public API
+│   ├── storage.rs       # Audio file management and path handling
+│   ├── platform.rs      # Platform detection and tool selection
+│   ├── recording.rs     # Audio recording implementation
+│   ├── playback.rs      # Audio playback implementation
+│   └── transcription.rs # Whisper integration for speech-to-text
 ├── cli/
 │   ├── mod.rs           # Command handling and help text
 │   ├── dateparser.rs    # Date parsing utilities
@@ -162,6 +176,12 @@ src/
   - `display.date_format` - Custom date format string
   - `display.stardate_mode` - Enable/disable stardate display format
   - `display.entries_per_page` - Pagination limit
+  - `audio.whisper_command` - Path to whisper.cpp binary (auto-detected by default)
+  - `audio.whisper_model` - Whisper model to use (default: "base.en")
+  - `audio.recording_tool` - Custom recording tool command (auto-detected by default)
+  - `audio.playback_tool` - Custom playback tool command (auto-detected by default)
+  - `audio.max_recording_seconds` - Maximum recording duration (default: 600)
+  - `audio.sample_rate` - Audio sample rate in Hz (default: 16000)
 
 ## Date Filtering
 All date-based filters (--date, --since, --until) support both absolute and relative date formats:
@@ -269,13 +289,33 @@ All date-based filters (--date, --since, --until) support both absolute and rela
 - [x] Visual formatting with grayed-out fractional components for readability
 - [x] Seamless switching between standard timestamps and stardate format
 
+### Audio Recording System
+- [x] Audio recording with automatic transcription using Whisper
+- [x] Platform-specific tool detection (sox/arecord for recording, afplay/ffplay for playback)
+- [x] Record command with journal category support and optional transcription skip
+- [x] Play command to replay audio from entries
+- [x] Audio file storage in dedicated directory alongside database
+- [x] Relative path storage in database for portability
+- [x] Graceful Ctrl+C handling during recording
+- [x] Configurable max recording duration
+- [x] Audio indicator (🎤) in entry summaries and detailed views
+- [x] Whisper.cpp integration for speech-to-text transcription
+- [x] Configurable Whisper model selection
+- [x] Error handling with fallback for transcription failures
+- [x] 16kHz mono WAV format optimized for speech recognition
+
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
 - [ ] Additional export formats (CSV, XML)
 - [ ] Additional import formats (Joplin, Notion, etc.)
 - [ ] Full-text search improvements
-- [ ] Attachment support (images, files)
+- [ ] Image attachment support
 - [ ] Entry templates for common journal types
+- [ ] Audio compression (WAV to Opus conversion)
+- [ ] Background transcription for long recordings
+- [ ] Multi-language support for transcription
+- [ ] Audio duration display in all views
+- [ ] Batch transcription command for existing audio files
 
 ## Testing Notes
 All functionality has been manually tested:
@@ -370,4 +410,24 @@ All functionality has been manually tested:
 7. Seamless switching between standard timestamps and stardate display
 8. Configuration persistence across application restarts
 9. Backward compatibility maintained with existing timestamp functionality
+
+### Audio Recording System Testing
+1. Platform detection working correctly (macOS/Linux tool selection)
+2. Recording tools detected in priority order (arecord → sox → ffmpeg on Linux)
+3. Playback tools detected in priority order (afplay on macOS, ffplay on Linux)
+4. Audio recording with Ctrl+C graceful shutdown functional
+5. Audio files created with correct format (16kHz mono WAV)
+6. Audio files stored in dedicated audio/ directory alongside database
+7. Relative path storage in database working correctly
+8. Transcription integration functional (requires whisper.cpp installation)
+9. Record command creates entries with transcribed content
+10. Play command successfully plays audio from entries
+11. Audio indicator (🎤) displays correctly in list and summary views
+12. Show command displays audio file path
+13. Error handling for missing tools displays helpful installation instructions
+14. Transcription fallback working when Whisper fails
+15. --no-transcribe flag working correctly (audio-only entries)
+16. --max-duration parameter working correctly
+17. Configuration options for audio tools working correctly
+
 - When you test implementation, always use -d parameter to do that on a test db

@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
+use std::path::PathBuf;
 
+mod audio;
 mod cli;
 mod config;
 mod database;
@@ -35,11 +37,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config = Config::load()?;
-    let db = if let Some(db_file) = &cli.database_file {
-        Database::new_with_path(db_file)?
+    let db_path = if let Some(db_file) = &cli.database_file {
+        PathBuf::from(db_file)
     } else {
-        Database::new(&config)?
+        config.get_database_path()?
     };
+    let db = Database::new_with_path(&db_path)?;
     let journal = Journal::new(db);
 
     if config.display.colors_enabled {
@@ -50,7 +53,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(command) => {
-            cli::handle_command(command, &journal, &config, cli.journal.as_deref())?;
+            cli::handle_command(command, &journal, &config, &db_path, cli.journal.as_deref())?;
         }
         None => {
             Cli::command().print_help()?;

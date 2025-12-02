@@ -9,6 +9,8 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub editor: EditorConfig,
     pub display: DisplayConfig,
+    #[serde(default)]
+    pub audio: AudioConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +33,52 @@ pub struct DisplayConfig {
     pub stardate_mode: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    #[serde(default)]
+    pub whisper_command: Option<String>,
+
+    #[serde(default = "default_whisper_model")]
+    pub whisper_model: String,
+
+    #[serde(default)]
+    pub recording_tool: Option<String>,
+
+    #[serde(default)]
+    pub playback_tool: Option<String>,
+
+    #[serde(default = "default_max_recording_seconds")]
+    pub max_recording_seconds: u64,
+
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: u32,
+}
+
+fn default_whisper_model() -> String {
+    "base.en".to_string()
+}
+
+fn default_max_recording_seconds() -> u64 {
+    600 // 10 minutes
+}
+
+fn default_sample_rate() -> u32 {
+    16000
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        AudioConfig {
+            whisper_command: None,
+            whisper_model: default_whisper_model(),
+            recording_tool: None,
+            playback_tool: None,
+            max_recording_seconds: default_max_recording_seconds(),
+            sample_rate: default_sample_rate(),
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         // Find default project directories
@@ -46,6 +94,7 @@ impl Default for Config {
                 entries_per_page: None,
                 stardate_mode: false,
             },
+            audio: AudioConfig::default(),
         }
     }
 }

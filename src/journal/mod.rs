@@ -135,6 +135,26 @@ impl Journal {
         Ok(conn.last_insert_rowid())
     }
 
+    pub fn create_entry_with_audio(
+        &self,
+        title: Option<&str>,
+        content: &str,
+        journal: Option<&str>,
+        audio_path: Option<&str>,
+    ) -> Result<i64> {
+        let conn = self.db.connection();
+        let now = Utc::now();
+        let journal_name = journal.unwrap_or("Personal");
+
+        conn.execute(
+            "INSERT INTO entries (timestamp, title, content, journal, audio_path, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![now, title, content, journal_name, audio_path, now, now],
+        )?;
+
+        Ok(conn.last_insert_rowid())
+    }
+
     pub fn get_entry(&self, id: i64) -> Result<Option<Entry>> {
         let conn = self.db.connection();
 

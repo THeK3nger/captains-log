@@ -148,6 +148,27 @@ pub enum Commands {
         #[arg(long)]
         journal: Option<String>,
     },
+
+    /// Record audio and create a new journal entry with transcription
+    Record {
+        /// Journal category for the new entry
+        #[arg(long)]
+        journal: Option<String>,
+
+        /// Skip transcription (audio only)
+        #[arg(long)]
+        no_transcribe: bool,
+
+        /// Maximum recording duration in seconds (default: 600)
+        #[arg(long)]
+        max_duration: Option<u64>,
+    },
+
+    /// Play audio from an existing entry
+    Play {
+        /// Entry ID to play audio from
+        id: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -169,6 +190,7 @@ pub fn handle_command(
     command: Commands,
     journal: &Journal,
     config: &Config,
+    db_path: &std::path::Path,
     global_journal: Option<&str>,
 ) -> Result<()> {
     match command {
@@ -378,6 +400,25 @@ pub fn handle_command(
                 import_journal.or_else(|| global_journal.map(str::to_string)),
             )?;
         }
+
+        Commands::Record {
+            journal: record_journal,
+            no_transcribe,
+            max_duration,
+        } => {
+            handle_record_command(
+                journal,
+                config,
+                db_path,
+                record_journal.or_else(|| global_journal.map(str::to_string)),
+                no_transcribe,
+                max_duration,
+            )?;
+        }
+
+        Commands::Play { id } => {
+            handle_play_command(journal, config, db_path, id)?;
+        }
     }
 
     Ok(())
@@ -536,6 +577,115 @@ fn handle_import_command(
     Ok(())
 }
 
+fn handle_record_command(
+    journal_obj: &Journal,
+    config: &Config,
+    db_path: &std::path::Path,
+    journal_category: Option<String>,
+    no_transcribe: bool,
+    max_duration: Option<u64>,
+) -> Result<()> {
+    use crate::audio::{
+        ensure_audio_directory_exists, generate_audio_filename, get_audio_directory, record_audio,
+        transcribe_audio,
+    };
+
+    // Ensure audio directory exists
+    ensure_audio_directory_exists(db_path)?;
+
+    // Generate filename
+    let audio_dir = get_audio_directory(db_path)?;
+    let filename = generate_audio_filename();
+    let full_path = audio_dir.join(&filename);
+
+    // Get max duration from config or parameter
+    let max_duration_secs = max_duration.unwrap_or(config.audio.max_recording_seconds);
+
+    // Record audio
+    let duration = record_audio(config, &full_path, max_duration_secs)?;
+
+    // Transcribe audio (unless skipped)
+    let transcription = if no_transcribe {
+        println!("{}", "Skipping transcription (--no-transcribe flag)".yellow());
+        "[Audio entry - no transcription]".to_string()
+    } else {
+        match transcribe_audio(config, &full_path) {
+            Ok(text) => {
+                // Display transcription to user
+                println!();
+                println!("{}", "─── Transcription ───".cyan().bold());
+                println!("{}", text);
+                println!("{}", "─────────────────────".cyan().bold());
+                println!();
+                text
+            }
+            Err(e) => {
+                println!("{}", format!("Warning: Transcription failed: {}", e).yellow());
+                println!("{}", "Saving entry with audio only...".yellow());
+                "[Transcription failed - audio only]".to_string()
+            }
+        }
+    };
+
+    println!("{}", "📝 Creating journal entry...".cyan());
+
+    // Create entry with audio
+    // Store relative path: audio/filename.wav
+    let relative_path = format!("audio/{}", filename);
+
+    let entry_id = journal_obj.create_entry_with_audio(
+        None, // No title
+        &transcription,
+        journal_category.as_deref(),
+        Some(&relative_path),
+    )?;
+
+    println!(
+        "{}",
+        format!("✓ Entry {} created successfully with audio attached", entry_id).green()
+    );
+    println!("  {}: {}", "Duration".cyan(), format!("{:.1}s", duration.as_secs_f64()));
+    println!("  {}: {}", "Audio".cyan(), relative_path.green());
+
+    Ok(())
+}
+
+fn handle_play_command(journal_obj: &Journal, config: &Config, db_path: &std::path::Path, id: i64) -> Result<()> {
+    use crate::audio::{get_audio_full_path, play_audio};
+    use colored::Colorize;
+
+    // Get entry
+    let entry = journal_obj
+        .get_entry(id)?
+        .ok_or_else(|| anyhow::anyhow!("Entry {} not found", id))?;
+
+    // Check if entry has audio
+    let audio_path = entry
+        .audio_path
+        .ok_or_else(|| anyhow::anyhow!("Entry {} has no audio recording", id))?;
+
+    // Get full path
+    let full_path = get_audio_full_path(db_path, &audio_path)?;
+
+    // Check if file exists
+    if !full_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Audio file not found at {}. It may have been moved or deleted.",
+            full_path.display()
+        ));
+    }
+
+    println!("{}", format!("🎵 Playing audio from entry {}...", id).cyan());
+    println!("  {}: {}", "Audio".cyan(), audio_path.green());
+
+    // Play audio
+    play_audio(config, &full_path)?;
+
+    println!("{}", "✓ Playback complete".green());
+
+    Ok(())
+}
+
 fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Result<()> {
     match action {
         Some(ConfigAction::Show) | None => {
@@ -580,6 +730,33 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
             } else {
                 println!("  entries_per_page: {} (no limit)", "auto".bright_black());
             }
+
+            println!();
+            println!("{}", "Audio:".yellow().bold());
+            if let Some(whisper_command) = &config.audio.whisper_command {
+                println!("  whisper_command: {}", whisper_command.green());
+            } else {
+                println!("  whisper_command: {} (auto-detect)", "auto".bright_black());
+            }
+            println!("  whisper_model: {}", config.audio.whisper_model.green());
+            if let Some(recording_tool) = &config.audio.recording_tool {
+                println!("  recording_tool: {}", recording_tool.green());
+            } else {
+                println!("  recording_tool: {} (auto-detect)", "auto".bright_black());
+            }
+            if let Some(playback_tool) = &config.audio.playback_tool {
+                println!("  playback_tool: {}", playback_tool.green());
+            } else {
+                println!("  playback_tool: {} (auto-detect)", "auto".bright_black());
+            }
+            println!(
+                "  max_recording_seconds: {}",
+                config.audio.max_recording_seconds.to_string().green()
+            );
+            println!(
+                "  sample_rate: {}",
+                config.audio.sample_rate.to_string().green()
+            );
         }
         Some(ConfigAction::Set { key, value }) => {
             let mut new_config = config.clone();
@@ -638,9 +815,57 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                         );
                     }
                 }
+                "audio.whisper_command" => {
+                    new_config.audio.whisper_command = Some(value.clone());
+                    println!(
+                        "{}",
+                        format!("Set audio.whisper_command to '{}'", value).green()
+                    );
+                }
+                "audio.whisper_model" => {
+                    new_config.audio.whisper_model = value.clone();
+                    println!(
+                        "{}",
+                        format!("Set audio.whisper_model to '{}'", value).green()
+                    );
+                }
+                "audio.recording_tool" => {
+                    new_config.audio.recording_tool = Some(value.clone());
+                    println!(
+                        "{}",
+                        format!("Set audio.recording_tool to '{}'", value).green()
+                    );
+                }
+                "audio.playback_tool" => {
+                    new_config.audio.playback_tool = Some(value.clone());
+                    println!(
+                        "{}",
+                        format!("Set audio.playback_tool to '{}'", value).green()
+                    );
+                }
+                "audio.max_recording_seconds" => {
+                    let seconds: u64 = value
+                        .parse()
+                        .context("audio.max_recording_seconds must be a number")?;
+                    new_config.audio.max_recording_seconds = seconds;
+                    println!(
+                        "{}",
+                        format!("Set audio.max_recording_seconds to {}", seconds).green()
+                    );
+                }
+                "audio.sample_rate" => {
+                    let rate: u32 = value
+                        .parse()
+                        .context("audio.sample_rate must be a number")?;
+                    new_config.audio.sample_rate = rate;
+                    println!(
+                        "{}",
+                        format!("Set audio.sample_rate to {}", rate).green()
+                    );
+                }
                 _ => {
                     return Err(anyhow::anyhow!(
-                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.stardate_mode, display.entries_per_page",
+                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.stardate_mode, display.entries_per_page, audio.whisper_command, audio.whisper_model, audio.recording_tool, audio.playback_tool, audio.max_recording_seconds, audio.sample_rate",
                         key
                     ));
                 }
@@ -695,6 +920,11 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
         println!("{}: {}", "Title".cyan().bold(), title.green().bold());
     }
 
+    // Display audio info if available
+    if let Some(audio_path) = &entry.audio_path {
+        println!("{}: {}", "Audio".cyan().bold(), audio_path.green());
+    }
+
     let content = render_markdown(&entry.content);
     let wrapped_content = wrap_text(&content, width);
 
@@ -729,17 +959,25 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
 
     let journal = format!("[{}]", entry.journal).magenta().bold();
 
+    // Add audio indicator if entry has audio
+    let audio_indicator = if entry.audio_path.is_some() {
+        " 🎤"
+    } else {
+        ""
+    };
+
     if let Some(title) = &entry.title {
         format!(
-            "{} {} {} - {} - {}",
+            "{} {} {} - {} - {}{}",
             id,
             date,
             journal,
             title.green().bold(),
-            content_preview.normal()
+            content_preview.normal(),
+            audio_indicator
         )
     } else {
-        format!("{} {} {} - {}", id, date, journal, content_preview.normal())
+        format!("{} {} {} - {}{}", id, date, journal, content_preview.normal(), audio_indicator)
     }
 }
 
