@@ -1,9 +1,9 @@
 use crate::journal::Journal;
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, NaiveDateTime};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
 
 pub struct Importer<'a> {
     journal: &'a Journal,
@@ -398,6 +398,14 @@ struct DayOneEntry {
     starred: bool,
     #[serde(default)]
     is_pinned: bool,
+    time_zone: Option<String>,
+    location: Option<DayOneLocation>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DayOneLocation {
+    time_zone_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -429,13 +437,37 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
     let mut entries = Vec::new();
 
     for dayone_entry in export.entries {
-        // Parse timestamp from ISO 8601 format
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&dayone_entry.creation_date)
+        // Parse timestamp from ISO 8601 format (DayOne stores in UTC)
+        let utc_time = chrono::DateTime::parse_from_rfc3339(&dayone_entry.creation_date)
             .context(format!(
                 "Failed to parse creation date: {}",
                 dayone_entry.creation_date
             ))?
-            .naive_utc();
+            .with_timezone(&chrono::Utc);
+
+        // Get timezone from either timeZone field or location.timeZoneName
+        let tz_str = dayone_entry.time_zone.as_ref().or_else(|| {
+            dayone_entry
+                .location
+                .as_ref()
+                .and_then(|loc| loc.time_zone_name.as_ref())
+        });
+
+        // Convert to local timezone if available, otherwise use UTC
+        let timestamp = if let Some(tz_string) = tz_str {
+            // Parse timezone (e.g., "Europe/Rome")
+            if let Ok(tz) = tz_string.parse::<Tz>() {
+                // Convert UTC time to the local timezone and get naive local time
+                let local_time = utc_time.with_timezone(&tz);
+                local_time.naive_local()
+            } else {
+                // If timezone parsing fails, fall back to UTC naive time
+                utc_time.naive_utc()
+            }
+        } else {
+            // If no timezone specified, use UTC naive time
+            utc_time.naive_utc()
+        };
 
         // Skip if filter_date is set and doesn't match
         if let Some(filter) = filter_date {
