@@ -397,22 +397,13 @@ fn handle_export_command(
 
     match format.to_lowercase().as_str() {
         "json" => {
-            export_with_success_message(
-                || exporter.export_to_json(output_path.clone(), filters),
-                &output_path,
-            )?;
+            exporter.export_to_json(output_path.clone(), filters)?;
         }
         "md" | "markdown" => {
-            export_with_success_message(
-                || exporter.export_to_markdown(output_path.clone(), filters),
-                &output_path,
-            )?;
+            exporter.export_to_markdown(output_path.clone(), filters)?;
         }
         "org" => {
-            export_with_success_message(
-                || exporter.export_to_org(output_path.clone(), filters),
-                &output_path,
-            )?;
+            exporter.export_to_org(output_path.clone(), filters)?;
         }
         _ => {
             return Err(anyhow::anyhow!(
@@ -420,6 +411,16 @@ fn handle_export_command(
                 format
             ));
         }
+    }
+
+    // Print success message
+    if let Some(path) = &output_path {
+        println!(
+            "{}",
+            format!("Entries exported successfully to {}", path).green()
+        );
+    } else {
+        println!("{}", "Entries exported successfully to stdout".green());
     }
 
     Ok(())
@@ -441,24 +442,6 @@ fn create_export_filters(
     } else {
         None
     }
-}
-
-fn export_with_success_message<F>(export_fn: F, output_path: &Option<String>) -> Result<()>
-where
-    F: FnOnce() -> Result<()>,
-{
-    export_fn()?;
-
-    if let Some(path) = output_path {
-        println!(
-            "{}",
-            format!("Entries exported successfully to {}", path).green()
-        );
-    } else {
-        println!("{}", "Entries exported successfully to stdout".green());
-    }
-
-    Ok(())
 }
 
 fn handle_import_command(
