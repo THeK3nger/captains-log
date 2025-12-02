@@ -361,7 +361,7 @@ pub fn handle_command(
                 date,
                 since,
                 until,
-                export_journal.or_else(|| global_journal.map(|s| s.to_string())),
+                export_journal.or_else(|| global_journal.map(str::to_string)),
             )?;
         }
         Commands::Import {
@@ -375,7 +375,7 @@ pub fn handle_command(
                 &path,
                 &format,
                 date,
-                import_journal.or_else(|| global_journal.map(|s| s.to_string())),
+                import_journal.or_else(|| global_journal.map(str::to_string)),
             )?;
         }
     }
@@ -586,12 +586,12 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
 
             match key.as_str() {
                 "database.path" => {
-                    new_config.database.path = Some(value.clone());
-                    println!("{}", format!("Set database.path to '{}'", value).green());
+                    new_config.database.path = Some(value);
+                    println!("{}", format!("Set database.path to '{}'", new_config.database.path.as_ref().unwrap()).green());
                 }
                 "editor.command" => {
-                    new_config.editor.command = Some(value.clone());
-                    println!("{}", format!("Set editor.command to '{}'", value).green());
+                    new_config.editor.command = Some(value);
+                    println!("{}", format!("Set editor.command to '{}'", new_config.editor.command.as_ref().unwrap()).green());
                 }
                 "display.colors_enabled" => {
                     let enabled: bool = value
@@ -604,10 +604,10 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                     );
                 }
                 "display.date_format" => {
-                    new_config.display.date_format = value.clone();
+                    new_config.display.date_format = value;
                     println!(
                         "{}",
-                        format!("Set display.date_format to '{}'", value).green()
+                        format!("Set display.date_format to '{}'", new_config.display.date_format).green()
                     );
                 }
                 "display.stardate_mode" => {
@@ -753,10 +753,10 @@ fn format_stardate(stardate: f64) -> String {
         let tail: String = chars[chars.len() - 2..].iter().collect();
         (head, tail)
     } else {
-        (stardate_string.clone(), String::new())
+        (stardate_string, String::new())
     };
 
-    format!("{}{}", head.white(), tail.bright_black()).to_string()
+    format!("{}{}", head.white(), tail.bright_black())
 }
 
 fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config) -> Result<()> {
@@ -840,12 +840,8 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     let temp_file = temp_dir.join(format!("captains-log-edit-{}.md", id));
 
     // Format content with title if present
-    let body_content = if entry.title.is_some() {
-        format!(
-            "# {}\n\n{}",
-            entry.title.as_deref().unwrap_or(""),
-            entry.content
-        )
+    let body_content = if let Some(title) = &entry.title {
+        format!("# {}\n\n{}", title, entry.content)
     } else {
         entry.content.clone()
     };

@@ -104,10 +104,8 @@ impl Config {
     }
 
     pub fn get_editor_command(&self) -> String {
-        if let Some(command) = &self.editor.command {
-            command.clone()
-        } else {
-            std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string())
-        }
+        self.editor.command.clone()
+            .or_else(|| std::env::var("EDITOR").ok())
+            .unwrap_or_else(|| "vim".to_string())
     }
 }

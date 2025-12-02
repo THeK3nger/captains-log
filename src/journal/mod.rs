@@ -46,7 +46,7 @@ impl Entry {
         let content_preview = if self.content.len() > summary_size {
             format!("{}...", &self.content[..summary_size])
         } else {
-            self.content.clone()
+            self.content.to_string()
         };
         let title = self.title.as_deref();
         if title.is_some() {
