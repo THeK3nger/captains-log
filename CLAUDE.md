@@ -9,8 +9,9 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Configuration System** - Global configuration file support added
 ✅ **Journal Categories** - Support for organizing entries by journal type
 ✅ **Export System** - JSON, Markdown, and ORG export functionality with filtering support and optimized timestamp ordering
+✅ **Import System** - ORG-journal and DayOne JSON import functionality with date and journal filtering
 ✅ **Database Override** - CLI parameter to override database location for any command
-✅ **External Editor Entry Creation** - New command to create entries directly using external editor
+✅ **Quick Entry Creation** - Create entries with inline content or using external editor
 ✅ **Stardate Mode Integration** - Consistent stardate formatting across all entry display commands
 
 ## Build & Test Commands
@@ -22,12 +23,14 @@ cargo build
 
 ### Run the application
 ```bash
-# Quick entry creation
-./target/debug/cl "Your journal entry content"
+# Quick entry creation (inline content)
+./target/debug/cl new "Your journal entry content"
+./target/debug/cl new "Your journal entry content" --journal Work
+./target/debug/cl new "Personal note" --journal Personal
 
-# Quick entry creation with journal category
-./target/debug/cl "Your journal entry content" --journal Work
-./target/debug/cl "Personal note" --journal Personal
+# Create new entry (opens external editor)
+./target/debug/cl new
+./target/debug/cl new --journal Work
 
 # List all entries
 ./target/debug/cl list
@@ -36,11 +39,32 @@ cargo build
 ./target/debug/cl list --journal Work
 ./target/debug/cl list --journal Personal
 
+# List entries with date filtering (supports both absolute and relative dates)
+./target/debug/cl list --since 2025-01-01
+./target/debug/cl list --until 2025-12-31
+./target/debug/cl list --date 2025-09-09
+
+# List entries with relative date filtering
+./target/debug/cl list --since "last week"
+./target/debug/cl list --since "yesterday"
+./target/debug/cl list --date "today"
+./target/debug/cl list --since "7 days ago"
+./target/debug/cl list --since "2 weeks ago"
+./target/debug/cl list --until "tomorrow"
+
+# Combine filters (date and journal)
+./target/debug/cl list --journal Work --since 2025-01-01
+./target/debug/cl list --journal Personal --date 2025-09-09
+./target/debug/cl list --journal Work --since "last month"
+
 # Show specific entry
 ./target/debug/cl show <id>
 
 # Search entries
 ./target/debug/cl search "<query>"
+
+# Edit entry (opens external editor)
+./target/debug/cl edit <id>
 
 # Delete entry
 ./target/debug/cl delete <id>
@@ -48,25 +72,10 @@ cargo build
 # Move entry to different journal
 ./target/debug/cl move <id> <target_journal>
 
-# Create new entry (opens external editor)
-./target/debug/cl new
-./target/debug/cl new --journal Work
-
-# Edit entry (opens external editor)
-./target/debug/cl edit <id>
-
-# List entries with date filtering
-./target/debug/cl list --since 2025-01-01
-./target/debug/cl list --until 2025-12-31
-./target/debug/cl list --date 2025-09-09
-
-# Combine filters (date and journal)
-./target/debug/cl list --journal Work --since 2025-01-01
-./target/debug/cl list --journal Personal --date 2025-09-09
-
 # Calendar view
 ./target/debug/cl calendar
 ./target/debug/cl calendar --year 2024 --month 12
+./target/debug/cl calendar --journal Work
 
 # Configuration management
 ./target/debug/cl config show
@@ -86,13 +95,14 @@ cargo build
 ./target/debug/cl export --output recent.md --since 2025-09-01 --format markdown
 ./target/debug/cl export --output filtered.org --journal Personal --since 2025-09-01 --until 2025-09-30 --format org
 
-# Move entries between journals
-./target/debug/cl move 123 Work
-./target/debug/cl move 456 Personal
-./target/debug/cl move 789 Projects
+# Import entries from ORG or DayOne formats
+./target/debug/cl import path/to/file.org --format org
+./target/debug/cl import path/to/journal.json --format dayone
+./target/debug/cl import file.org --format org --journal Work
+./target/debug/cl import file.org --format org --date 2025-09-09
 
 # Override database location (global parameter for any command)
-./target/debug/cl -d "path/to/custom.db" "Entry with custom database"
+./target/debug/cl -d "path/to/custom.db" new "Entry with custom database"
 ./target/debug/cl --database "/tmp/temp.db" list
 ./target/debug/cl -d "backup.db" export --output backup.json --format json
 
@@ -118,14 +128,18 @@ src/
 ├── main.rs              # CLI entry point and argument parsing
 ├── cli/
 │   ├── mod.rs           # Command handling and help text
+│   ├── dateparser.rs    # Date parsing utilities
 │   ├── formatting.rs    # Markdown rendering utilities
+│   ├── frontmatter.rs   # YAML frontmatter parsing and formatting
 │   └── stardate.rs      # Stardate conversion system
 ├── config/
 │   └── mod.rs           # Configuration management and file handling
 ├── database/
 │   └── mod.rs           # SQLite connection and migrations
 ├── export/
-│   └── mod.rs           # Export functionality (JSON and ORG formats)
+│   └── mod.rs           # Export functionality (JSON, Markdown, and ORG formats)
+├── import/
+│   └── mod.rs           # Import functionality (ORG-journal and DayOne formats)
 └── journal/
     └── mod.rs           # Entry model and CRUD operations
 ```
@@ -149,6 +163,35 @@ src/
   - `display.stardate_mode` - Enable/disable stardate display format
   - `display.entries_per_page` - Pagination limit
 
+## Date Filtering
+All date-based filters (--date, --since, --until) support both absolute and relative date formats:
+
+### Absolute Dates
+- Standard format: `YYYY-MM-DD` (e.g., `2025-01-15`)
+
+### Relative Dates
+- **Simple**: `today`, `yesterday`, `tomorrow`
+- **Week-based**: `this week`, `last week`, `next week`
+- **Month-based**: `last month`, `next month`
+- **Year-based**: `last year`, `next year`
+- **Days offset**: `X days ago`, `X days from now` (e.g., `7 days ago`)
+- **Weeks offset**: `X weeks ago`, `X weeks from now` (e.g., `2 weeks ago`)
+
+### Examples
+```bash
+# Show entries from yesterday
+./target/debug/cl list --since yesterday
+
+# Show entries from the last week
+./target/debug/cl list --since "last week"
+
+# Show entries from 7 days ago until today
+./target/debug/cl list --since "7 days ago"
+
+# Export entries from last month
+./target/debug/cl export --output last_month.json --since "last month" --format json
+```
+
 ## Features Implemented
 
 ### Phase 1 - Core Features
@@ -164,6 +207,7 @@ src/
 - [x] External editor integration (respects $EDITOR environment variable, defaults to nvim)
 - [x] Rich terminal formatting with colors and improved layout
 - [x] Date-based filtering (--date, --since, --until options for list command)
+- [x] Relative date parsing (e.g., "yesterday", "last week", "7 days ago", "this week")
 - [x] Entry editing capabilities
 - [x] New entry creation using external editor
 
@@ -201,12 +245,22 @@ src/
 - [x] Maintains backward compatibility with config and default database
 - [x] Automatic directory creation for custom database paths
 
-### External Editor Entry Creation
-- [x] New `new` command for creating entries using external editor
+### Quick Entry Creation
+- [x] New `new` command for creating entries
+- [x] Inline content creation via command arguments (e.g., `cl new "content"`)
+- [x] External editor integration for detailed entry creation
 - [x] Template-based entry creation with title and content parsing
 - [x] Support for journal category specification via --journal parameter
 - [x] Empty entry cancellation (no content provided)
 - [x] Consistent external editor integration using existing configuration
+
+### Import System
+- [x] ORG-journal format import support
+- [x] DayOne JSON format import support
+- [x] Date filtering for imports (--date parameter)
+- [x] Journal category assignment for imported entries
+- [x] Detailed import statistics (total, imported, skipped, errors)
+- [x] Error handling and reporting for malformed entries
 
 ### Stardate Mode Integration
 - [x] Configurable stardate display mode via `display.stardate_mode` setting
@@ -218,9 +272,10 @@ src/
 ## Future Enhancement Ideas
 - [ ] Tagging system for entries
 - [ ] Additional export formats (CSV, XML)
-- [ ] Import from other journal formats
+- [ ] Additional import formats (Joplin, Notion, etc.)
 - [ ] Full-text search improvements
 - [ ] Attachment support (images, files)
+- [ ] Entry templates for common journal types
 
 ## Testing Notes
 All functionality has been manually tested:
@@ -234,11 +289,12 @@ All functionality has been manually tested:
 
 ### Phase 2 Testing
 1. Calendar view displays correctly with entry indicators
-2. Date filtering (--date, --since, --until) works properly
-3. External editor integration functional (uses $EDITOR or defaults to nvim)
-4. Entry editing updates database correctly
-5. Rich terminal formatting enhances user experience
-6. All new commands properly documented in help system
+2. Date filtering (--date, --since, --until) works properly with absolute dates
+3. Relative date parsing working correctly (today, yesterday, last week, X days ago, etc.)
+4. External editor integration functional (uses $EDITOR or defaults to nvim)
+5. Entry editing updates database correctly
+6. Rich terminal formatting enhances user experience
+7. All new commands properly documented in help system
 
 ### Configuration System Testing
 1. Configuration file creation with sensible defaults
@@ -283,15 +339,26 @@ All functionality has been manually tested:
 6. Default database remains unaffected when using custom database override
 7. Backward compatibility maintained with existing configuration system
 
-### External Editor Entry Creation Testing
+### Quick Entry Creation Testing
 1. New `new` command functionality working correctly
-2. External editor opens with template content (title placeholder)
-3. Title and content parsing from editor output functional
-4. Journal category specification via --journal parameter working
-5. Empty entry cancellation working (exits gracefully when no content)
-6. Entry creation with various content formats (title+content, content-only) operational
-7. Integration with existing editor configuration working correctly
-8. Database override parameter compatibility confirmed
+2. Inline content creation via command arguments working (e.g., `cl new "content"`)
+3. External editor opens with template content (title placeholder)
+4. Title and content parsing from editor output functional
+5. Journal category specification via --journal parameter working
+6. Empty entry cancellation working (exits gracefully when no content)
+7. Entry creation with various content formats (title+content, content-only) operational
+8. Integration with existing editor configuration working correctly
+9. Database override parameter compatibility confirmed
+
+### Import System Testing
+1. ORG-journal format import functionality working correctly
+2. DayOne JSON format import functionality working correctly
+3. Date filtering for imports operational (--date parameter)
+4. Journal category assignment for imported entries working
+5. Import statistics display (total, imported, skipped, errors) accurate
+6. Error handling for malformed entries working correctly
+7. Timestamp parsing and preservation functional
+8. Experimental feature warnings displayed appropriately
 
 ### Stardate Mode Integration Testing
 1. Stardate mode configuration setting and management working correctly
