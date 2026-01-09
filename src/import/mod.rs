@@ -290,7 +290,13 @@ fn convert_org_to_markdown(org: &str) -> String {
         let mut converted = line.to_string();
 
         // Headings: *** -> ###
-        if trimmed.starts_with('*') && trimmed.chars().nth(1) != Some('*') {
+        // Org-mode headings must have a space after the asterisks
+        let is_heading = trimmed.starts_with('*') && {
+            let after_asterisks = trimmed.trim_start_matches('*');
+            after_asterisks.starts_with(' ')
+        };
+
+        if is_heading {
             let level = trimmed.chars().take_while(|&c| c == '*').count();
             let rest = trimmed.trim_start_matches('*').trim();
             converted = format!("{} {}", "#".repeat(level), rest);
