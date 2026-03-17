@@ -169,6 +169,13 @@ pub enum Commands {
         /// Entry ID to play audio from
         id: i64,
     },
+
+    /// Start the LCARS web interface (read-only)
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 4343)]
+        port: u16,
+    },
 }
 
 #[derive(Subcommand)]
@@ -419,6 +426,9 @@ pub fn handle_command(
 
         Commands::Play { id } => {
             handle_play_command(journal, config, db_path, id)?;
+        }
+        Commands::Serve { .. } => {
+            // handled in main.rs before handle_command is called
         }
     }
 

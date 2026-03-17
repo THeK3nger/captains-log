@@ -10,6 +10,7 @@ mod database;
 mod export;
 mod import;
 mod journal;
+mod server;
 
 use cli::Commands;
 use config::Config;
@@ -42,6 +43,11 @@ fn main() -> Result<()> {
     } else {
         config.get_database_path()?
     };
+
+    if let Some(Commands::Serve { port }) = &cli.command {
+        return server::run(&db_path, *port);
+    }
+
     let db = Database::new_with_path(&db_path)?;
     let journal = Journal::new(db);
 
