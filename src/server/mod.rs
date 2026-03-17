@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum::{
     extract::{Path, State},
+    http::HeaderMap,
     response::Html,
     routing::get,
     Router,
@@ -43,20 +44,39 @@ async fn index_handler(State(state): State<AppState>) -> Html<String> {
         j.list_entries().unwrap_or_default()
     };
     let count = entries.len();
-    let list_html = render_entry_list(&entries);
-    Html(full_page(&list_html, count))
+    let list_html = render_entry_list(&entries, None);
+    Html(full_page(&list_html, count, PLACEHOLDER_HTML))
 }
 
-async fn entry_handler(State(state): State<AppState>, Path(id): Path<i64>) -> Html<String> {
+async fn entry_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Html<String> {
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
         j.get_entry(id)
     };
-    Html(match result {
+    let detail_html = match result {
         Ok(Some(entry)) => render_entry_detail(&entry),
         _ => r#"<div class="placeholder"><div class="placeholder-text">ENTRY NOT FOUND</div></div>"#.to_string(),
-    })
+    };
+
+    // HTMX requests get just the partial; direct browser navigation gets the full page
+    if headers.contains_key("hx-request") {
+        Html(detail_html)
+    } else {
+        let entries = {
+            let j = state.journal.lock().expect("journal lock poisoned");
+            j.list_entries().unwrap_or_default()
+        };
+        let count = entries.len();
+        let list_html = render_entry_list(&entries, Some(id));
+        Html(full_page(&list_html, count, &detail_html))
+    }
 }
+
+const PLACEHOLDER_HTML: &str = r#"<div class="placeholder"><div class="placeholder-icon">✦</div><div class="placeholder-text">SELECT AN ENTRY TO VIEW</div></div>"#;
 
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -75,7 +95,7 @@ fn to_html(markdown: &str) -> String {
     out
 }
 
-fn render_entry_list(entries: &[Entry]) -> String {
+fn render_entry_list(entries: &[Entry], active_id: Option<i64>) -> String {
     if entries.is_empty() {
         return r#"<div class="placeholder" style="height:100%"><div class="placeholder-text">NO ENTRIES ON RECORD</div></div>"#.to_string();
     }
@@ -89,19 +109,22 @@ fn render_entry_list(entries: &[Entry]) -> String {
             } else {
                 ""
             };
+            let active = if active_id == Some(e.id) { " active" } else { "" };
             let local_ts = e.timestamp.with_timezone(&Local);
             format!(
                 concat!(
-                    r#"<div class="entry-item""#,
+                    r#"<div class="entry-item{active}""#,
                     r#" hx-get="/entry/{id}""#,
                     r##" hx-target="#entry-detail""##,
                     r#" hx-swap="innerHTML""#,
+                    r#" hx-push-url="true""#,
                     r#" onclick="document.querySelectorAll('.entry-item').forEach(n=>n.classList.remove('active'));this.classList.add('active')">"#,
                     r#"<div class="ei-meta"><span class="ei-date">{date}</span><span class="ei-journal">{journal}</span></div>"#,
                     r#"<div class="ei-title">{title}{audio}</div>"#,
                     r#"<div class="ei-preview">{preview}</div>"#,
                     r#"</div>"#,
                 ),
+                active = active,
                 id = e.id,
                 date = local_ts.format("%Y-%m-%d %H:%M"),
                 journal = escape_html(&e.journal),
@@ -141,7 +164,7 @@ fn render_entry_detail(entry: &Entry) -> String {
     )
 }
 
-fn full_page(list_html: &str, count: usize) -> String {
+fn full_page(list_html: &str, count: usize, detail_html: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -175,21 +198,36 @@ fn full_page(list_html: &str, count: usize) -> String {
       {list_html}
     </div>
     <div class="entry-detail" id="entry-detail">
-      <div class="placeholder">
-        <div class="placeholder-icon">✦</div>
-        <div class="placeholder-text">SELECT AN ENTRY TO VIEW</div>
-      </div>
+      {detail_html}
     </div>
   </div>
 
   <div class="bl-elbow"></div>
   <div class="bottom-bar">{count} ENTRIES ON RECORD</div>
 </div>
+<script>
+window.addEventListener('popstate', function() {{
+  var m = location.pathname.match(/^\/entry\/(\d+)$/);
+  var detail = document.getElementById('entry-detail');
+  document.querySelectorAll('.entry-item').forEach(function(n) {{ n.classList.remove('active'); }});
+  if (m) {{
+    var el = document.querySelector('[hx-get="/entry/' + m[1] + '"]');
+    if (el) el.classList.add('active');
+    fetch('/entry/' + m[1], {{headers: {{'HX-Request': 'true'}}}})
+      .then(function(r) {{ return r.text(); }})
+      .then(function(html) {{ detail.innerHTML = html; }});
+  }} else {{
+    detail.innerHTML = '{placeholder}';
+  }}
+}});
+</script>
 </body>
 </html>"#,
         css = CSS,
         list_html = list_html,
         count = count,
+        detail_html = detail_html,
+        placeholder = PLACEHOLDER_HTML,
     )
 }
 
