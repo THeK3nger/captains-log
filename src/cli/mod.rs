@@ -384,6 +384,7 @@ pub fn handle_command(
                 since,
                 until,
                 export_journal.or_else(|| global_journal.map(str::to_string)),
+                config.display.timezone.clone(),
             )?;
         }
         Commands::Import {
@@ -432,9 +433,10 @@ fn handle_export_command(
     since: Option<String>,
     until: Option<String>,
     journal_filter: Option<String>,
+    timezone: Option<String>,
 ) -> Result<()> {
     let filters = create_export_filters(date, since, until, journal_filter);
-    let exporter = Exporter::new(journal);
+    let exporter = Exporter::new(journal, timezone);
 
     match format.to_lowercase().as_str() {
         "json" => {
@@ -730,6 +732,11 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
             } else {
                 println!("  entries_per_page: {} (no limit)", "auto".bright_black());
             }
+            if let Some(tz) = &config.display.timezone {
+                println!("  timezone: {}", tz.green());
+            } else {
+                println!("  timezone: {} (system local time)", "auto".bright_black());
+            }
 
             println!();
             println!("{}", "Audio:".yellow().bold());
@@ -815,6 +822,18 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                         );
                     }
                 }
+                "display.timezone" => {
+                    if value == "auto" || value == "none" || value.is_empty() {
+                        new_config.display.timezone = None;
+                        println!("{}", "Set display.timezone to auto (system local time)".green());
+                    } else {
+                        // Validate the timezone name
+                        value.parse::<chrono_tz::Tz>()
+                            .map_err(|_| anyhow::anyhow!("Unknown timezone '{}'. Use an IANA timezone name like 'Europe/Rome'", value))?;
+                        new_config.display.timezone = Some(value.clone());
+                        println!("{}", format!("Set display.timezone to '{}'", value).green());
+                    }
+                }
                 "audio.whisper_command" => {
                     new_config.audio.whisper_command = Some(value.clone());
                     println!(
@@ -865,7 +884,7 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                 }
                 _ => {
                     return Err(anyhow::anyhow!(
-                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.stardate_mode, display.entries_per_page, audio.whisper_command, audio.whisper_model, audio.recording_tool, audio.playback_tool, audio.max_recording_seconds, audio.sample_rate",
+                        "Unknown configuration key '{}'. Available keys: database.path, editor.command, display.colors_enabled, display.date_format, display.stardate_mode, display.entries_per_page, display.timezone, audio.whisper_command, audio.whisper_model, audio.recording_tool, audio.playback_tool, audio.max_recording_seconds, audio.sample_rate",
                         key
                     ));
                 }

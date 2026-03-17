@@ -1,6 +1,8 @@
 use crate::cli::dateparser::parse_relative_date;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
+use chrono_tz::Tz;
 use pulldown_cmark::{Event, Options, Tag, TagEnd};
 
 use serde::{Deserialize, Serialize};
@@ -16,11 +18,26 @@ pub struct ExportData {
 
 pub struct Exporter<'a> {
     journal: &'a Journal,
+    timezone: Option<String>,
 }
 
 impl<'a> Exporter<'a> {
-    pub fn new(journal: &'a Journal) -> Self {
-        Self { journal }
+    pub fn new(journal: &'a Journal, timezone: Option<String>) -> Self {
+        Self { journal, timezone }
+    }
+
+    /// Convert a UTC timestamp to the configured (or system local) timezone.
+    fn to_local(&self, utc: &DateTime<Utc>) -> DateTime<FixedOffset> {
+        if let Some(tz_str) = &self.timezone {
+            if let Ok(tz) = tz_str.parse::<Tz>() {
+                return utc.with_timezone(&tz).fixed_offset();
+            }
+        }
+        utc.with_timezone(&Local).fixed_offset()
+    }
+
+    fn local_date(&self, utc: &DateTime<Utc>) -> NaiveDate {
+        self.to_local(utc).date_naive()
     }
 
     pub fn export_to_json(
@@ -60,7 +77,7 @@ impl<'a> Exporter<'a> {
             md_content.push_str(&format!("## {}\n\n", formatted_date));
 
             for entry in &entries {
-                let date_str = entry.timestamp.format("%H:%M").to_string();
+                let date_str = self.to_local(&entry.timestamp).format("%H:%M").to_string();
                 if let Some(title) = &entry.title {
                     md_content.push_str(&format!("### {} - {}\n\n", date_str, title));
                 } else {
@@ -89,7 +106,7 @@ impl<'a> Exporter<'a> {
         for (date, entries) in grouped_entries {
             let created_date = entries
                 .first()
-                .map(|e| e.timestamp.format("%Y%m%d").to_string())
+                .map(|e| self.to_local(&e.timestamp).format("%Y%m%d").to_string())
                 .unwrap_or_default();
             let formatted_date = date.format("%A, %d/%m/%Y").to_string();
             org_content.push_str(&format!("* {}\n", formatted_date));
@@ -98,7 +115,7 @@ impl<'a> Exporter<'a> {
                 created_date
             ));
             for entry in entries {
-                let time = entry.timestamp.format("%H:%M").to_string();
+                let time = self.to_local(&entry.timestamp).format("%H:%M").to_string();
                 if let Some(title) = &entry.title {
                     org_content.push_str(&format!("** {} {}\n", time, title));
                 } else {
@@ -155,13 +172,12 @@ impl<'a> Exporter<'a> {
     fn group_entries_by_date<'b>(
         &self,
         entries: &'b [Entry],
-    ) -> std::collections::BTreeMap<chrono::NaiveDate, Vec<&'b Entry>> {
-        use chrono::NaiveDate;
+    ) -> std::collections::BTreeMap<NaiveDate, Vec<&'b Entry>> {
         use std::collections::BTreeMap;
 
         let mut grouped_entries: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
         for entry in entries {
-            let date_key = entry.timestamp.naive_utc().date();
+            let date_key = self.local_date(&entry.timestamp);
             grouped_entries.entry(date_key).or_default().push(entry);
         }
         grouped_entries

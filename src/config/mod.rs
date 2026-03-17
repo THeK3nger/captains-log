@@ -31,6 +31,11 @@ pub struct DisplayConfig {
 
     #[serde(default)]
     pub stardate_mode: bool,
+
+    /// IANA timezone name for export timestamps (e.g. "Europe/Rome").
+    /// If absent, the system local time is used.
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +98,7 @@ impl Default for Config {
                 date_format: "%Y-%m-%d %H:%M:%S".to_string(),
                 entries_per_page: None,
                 stardate_mode: false,
+                timezone: None,
             },
             audio: AudioConfig::default(),
         }
