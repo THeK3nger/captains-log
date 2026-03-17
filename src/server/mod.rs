@@ -203,7 +203,10 @@ fn full_page(list_html: &str, count: usize, detail_html: &str) -> String {
   </div>
 
   <div class="bl-elbow"></div>
-  <div class="bottom-bar">{count} ENTRIES ON RECORD</div>
+  <div class="bottom-bar">
+    <span>{count} ENTRIES ON RECORD</span>
+    <span class="bottom-bar-version">v{version}</span>
+  </div>
 </div>
 <script>
 window.addEventListener('popstate', function() {{
@@ -228,6 +231,7 @@ window.addEventListener('popstate', function() {{
         count = count,
         detail_html = detail_html,
         placeholder = PLACEHOLDER_HTML,
+        version = env!("CARGO_PKG_VERSION"),
     )
 }
 
@@ -344,12 +348,20 @@ html, body {
   background: var(--tan);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 24px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 2px;
   color: #000;
   text-transform: uppercase;
+}
+
+.bottom-bar-version {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  opacity: 0.6;
 }
 
 /* Entry list items */
