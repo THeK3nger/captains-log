@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use rand::Rng;
+use rand::distr::SampleString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,11 +19,7 @@ pub fn generate_audio_filename() -> String {
     let timestamp = now.format("%Y%m%d_%H%M%S");
 
     // Generate 6 random alphanumeric characters
-    let suffix: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
-        .take(6)
-        .map(char::from)
-        .collect();
+    let suffix = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 6);
 
     format!("{}_{}.wav", timestamp, suffix.to_lowercase())
 }

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
-rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+rusqlite = { version = "0.39", features = ["bundled", "chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 serde = { version = "1.0", features = ["derive"] }
@@ -18,9 +18,9 @@ pulldown-cmark = "0.13.0"
 regex = "1.11"
 terminal_size = "0.4.3"
 textwrap = { version = "0.16", features = ["unicode-width"] }
-rand = "0.8"
-which = "6.0"
-signal-hook = "0.3"
+rand = "0.10"
+which = "8.0"
+signal-hook = "0.4"
 libc = "0.2"
 
 [[bin]]
