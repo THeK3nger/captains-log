@@ -21,10 +21,7 @@ pub fn play_audio(config: &Config, audio_path: &Path) -> Result<()> {
     let status = cmd.status().context("Failed to execute playback")?;
 
     if !status.success() {
-        return Err(anyhow::anyhow!(
-            "Playback failed with status: {}",
-            status
-        ));
+        return Err(anyhow::anyhow!("Playback failed with status: {}", status));
     }
 
     Ok(())
@@ -33,9 +30,7 @@ pub fn play_audio(config: &Config, audio_path: &Path) -> Result<()> {
 /// Build the playback command based on tool and platform
 fn build_playback_command(tool: &str, audio_path: &Path) -> Result<Command> {
     let platform = detect_platform();
-    let audio_str = audio_path
-        .to_str()
-        .context("Invalid audio path")?;
+    let audio_str = audio_path.to_str().context("Invalid audio path")?;
 
     let mut cmd = Command::new(tool);
 
@@ -47,7 +42,7 @@ fn build_playback_command(tool: &str, audio_path: &Path) -> Result<Command> {
         "ffplay" => {
             // FFmpeg audio player
             cmd.args(&[
-                "-nodisp", // No video display
+                "-nodisp",   // No video display
                 "-autoexit", // Exit when done
                 audio_str,
             ]);

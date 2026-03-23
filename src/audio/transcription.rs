@@ -51,8 +51,8 @@ pub fn detect_whisper() -> Result<String> {
 
 /// Get the path to the Whisper model
 fn get_model_path(model_name: &str) -> Result<PathBuf> {
-    let proj_dirs = ProjectDirs::from("", "", "captains-log")
-        .context("Failed to get project directories")?;
+    let proj_dirs =
+        ProjectDirs::from("", "", "captains-log").context("Failed to get project directories")?;
 
     let models_dir = proj_dirs.data_dir().join("models");
 
@@ -79,8 +79,7 @@ fn run_whisper(whisper_cmd: &str, model_path: &Path, audio_path: &Path) -> Resul
 
     let output = Command::new(whisper_cmd)
         .args(&[
-            "-m",
-            model_str, // Model file
+            "-m", model_str, // Model file
             "-nt",     // No timestamps in output
             audio_str, // Audio file (positional argument)
         ])
@@ -89,15 +88,12 @@ fn run_whisper(whisper_cmd: &str, model_path: &Path, audio_path: &Path) -> Resul
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!(
-            "Whisper transcription failed: {}",
-            stderr
-        ));
+        return Err(anyhow::anyhow!("Whisper transcription failed: {}", stderr));
     }
 
     // Parse output - whisper.cpp writes transcription to stdout
-    let transcription = String::from_utf8(output.stdout)
-        .context("Failed to parse whisper output as UTF-8")?;
+    let transcription =
+        String::from_utf8(output.stdout).context("Failed to parse whisper output as UTF-8")?;
 
     // Clean up the transcription
     let cleaned = transcription
@@ -144,8 +140,8 @@ fn create_whisper_not_found_error() -> anyhow::Error {
 }
 
 fn create_model_not_found_error(model_name: &str) -> anyhow::Error {
-    let proj_dirs = ProjectDirs::from("", "", "captains-log")
-        .expect("Failed to get project directories");
+    let proj_dirs =
+        ProjectDirs::from("", "", "captains-log").expect("Failed to get project directories");
     let models_dir = proj_dirs.data_dir().join("models");
 
     let model_filename = if model_name.starts_with("ggml-") {

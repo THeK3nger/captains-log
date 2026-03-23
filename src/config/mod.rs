@@ -159,7 +159,9 @@ impl Config {
     }
 
     pub fn get_editor_command(&self) -> String {
-        self.editor.command.clone()
+        self.editor
+            .command
+            .clone()
             .or_else(|| std::env::var("EDITOR").ok())
             .unwrap_or_else(|| "vim".to_string())
     }

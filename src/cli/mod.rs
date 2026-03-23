@@ -618,7 +618,10 @@ fn handle_record_command(
 
     // Transcribe audio (unless skipped)
     let transcription = if no_transcribe {
-        println!("{}", "Skipping transcription (--no-transcribe flag)".yellow());
+        println!(
+            "{}",
+            "Skipping transcription (--no-transcribe flag)".yellow()
+        );
         "[Audio entry - no transcription]".to_string()
     } else {
         match transcribe_audio(config, &full_path) {
@@ -632,7 +635,10 @@ fn handle_record_command(
                 text
             }
             Err(e) => {
-                println!("{}", format!("Warning: Transcription failed: {}", e).yellow());
+                println!(
+                    "{}",
+                    format!("Warning: Transcription failed: {}", e).yellow()
+                );
                 println!("{}", "Saving entry with audio only...".yellow());
                 "[Transcription failed - audio only]".to_string()
             }
@@ -654,15 +660,28 @@ fn handle_record_command(
 
     println!(
         "{}",
-        format!("✓ Entry {} created successfully with audio attached", entry_id).green()
+        format!(
+            "✓ Entry {} created successfully with audio attached",
+            entry_id
+        )
+        .green()
     );
-    println!("  {}: {}", "Duration".cyan(), format!("{:.1}s", duration.as_secs_f64()));
+    println!(
+        "  {}: {}",
+        "Duration".cyan(),
+        format!("{:.1}s", duration.as_secs_f64())
+    );
     println!("  {}: {}", "Audio".cyan(), relative_path.green());
 
     Ok(())
 }
 
-fn handle_play_command(journal_obj: &Journal, config: &Config, db_path: &std::path::Path, id: i64) -> Result<()> {
+fn handle_play_command(
+    journal_obj: &Journal,
+    config: &Config,
+    db_path: &std::path::Path,
+    id: i64,
+) -> Result<()> {
     use crate::audio::{get_audio_full_path, play_audio};
     use colored::Colorize;
 
@@ -687,7 +706,10 @@ fn handle_play_command(journal_obj: &Journal, config: &Config, db_path: &std::pa
         ));
     }
 
-    println!("{}", format!("🎵 Playing audio from entry {}...", id).cyan());
+    println!(
+        "{}",
+        format!("🎵 Playing audio from entry {}...", id).cyan()
+    );
     println!("  {}: {}", "Audio".cyan(), audio_path.green());
 
     // Play audio
@@ -781,11 +803,25 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
             match key.as_str() {
                 "database.path" => {
                     new_config.database.path = Some(value);
-                    println!("{}", format!("Set database.path to '{}'", new_config.database.path.as_ref().unwrap()).green());
+                    println!(
+                        "{}",
+                        format!(
+                            "Set database.path to '{}'",
+                            new_config.database.path.as_ref().unwrap()
+                        )
+                        .green()
+                    );
                 }
                 "editor.command" => {
                     new_config.editor.command = Some(value);
-                    println!("{}", format!("Set editor.command to '{}'", new_config.editor.command.as_ref().unwrap()).green());
+                    println!(
+                        "{}",
+                        format!(
+                            "Set editor.command to '{}'",
+                            new_config.editor.command.as_ref().unwrap()
+                        )
+                        .green()
+                    );
                 }
                 "display.colors_enabled" => {
                     let enabled: bool = value
@@ -801,7 +837,11 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                     new_config.display.date_format = value;
                     println!(
                         "{}",
-                        format!("Set display.date_format to '{}'", new_config.display.date_format).green()
+                        format!(
+                            "Set display.date_format to '{}'",
+                            new_config.display.date_format
+                        )
+                        .green()
                     );
                 }
                 "display.stardate_mode" => {
@@ -835,7 +875,10 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                 "display.timezone" => {
                     if value == "auto" || value == "none" || value.is_empty() {
                         new_config.display.timezone = None;
-                        println!("{}", "Set display.timezone to auto (system local time)".green());
+                        println!(
+                            "{}",
+                            "Set display.timezone to auto (system local time)".green()
+                        );
                     } else {
                         // Validate the timezone name
                         value.parse::<chrono_tz::Tz>()
@@ -887,10 +930,7 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                         .parse()
                         .context("audio.sample_rate must be a number")?;
                     new_config.audio.sample_rate = rate;
-                    println!(
-                        "{}",
-                        format!("Set audio.sample_rate to {}", rate).green()
-                    );
+                    println!("{}", format!("Set audio.sample_rate to {}", rate).green());
                 }
                 _ => {
                     return Err(anyhow::anyhow!(
@@ -1006,7 +1046,14 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
             audio_indicator
         )
     } else {
-        format!("{} {} {} - {}{}", id, date, journal, content_preview.normal(), audio_indicator)
+        format!(
+            "{} {} {} - {}{}",
+            id,
+            date,
+            journal,
+            content_preview.normal(),
+            audio_indicator
+        )
     }
 }
 

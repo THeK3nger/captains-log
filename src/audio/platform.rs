@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use colored::Colorize;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,10 +81,7 @@ fn create_recording_tool_error(platform: Platform) -> anyhow::Error {
             )
         }
         Platform::Windows => {
-            format!(
-                "Please install:\n  • {}",
-                "choco install ffmpeg".green()
-            )
+            format!("Please install:\n  • {}", "choco install ffmpeg".green())
         }
     };
 
@@ -107,10 +104,7 @@ fn create_playback_tool_error(platform: Platform) -> anyhow::Error {
             )
         }
         Platform::Windows => {
-            format!(
-                "Please install:\n  • {}",
-                "choco install ffmpeg".green()
-            )
+            format!("Please install:\n  • {}", "choco install ffmpeg".green())
         }
     };
 

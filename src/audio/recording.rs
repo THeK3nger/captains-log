@@ -1,4 +1,4 @@
-use crate::audio::platform::{detect_platform, detect_recording_tool, Platform};
+use crate::audio::platform::{Platform, detect_platform, detect_recording_tool};
 use crate::config::Config;
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -6,18 +6,14 @@ use signal_hook::consts::SIGINT;
 use signal_hook::iterator::Signals;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 /// Record audio to the specified output path
 /// Blocks until recording is stopped (Ctrl+C) or max_duration is reached
-pub fn record_audio(
-    config: &Config,
-    output_path: &Path,
-    max_duration: u64,
-) -> Result<Duration> {
+pub fn record_audio(config: &Config, output_path: &Path, max_duration: u64) -> Result<Duration> {
     // Get recording tool
     let tool = config
         .audio
@@ -36,9 +32,7 @@ pub fn record_audio(
     );
 
     // Start recording
-    let mut child = cmd
-        .spawn()
-        .context("Failed to start recording process")?;
+    let mut child = cmd.spawn().context("Failed to start recording process")?;
 
     // Set up Ctrl+C handler
     let interrupted = Arc::new(AtomicBool::new(false));
@@ -65,7 +59,11 @@ pub fn record_audio(
         Ok(()) => {
             println!(
                 "{}",
-                format!("✓ Recording stopped ({:.1} seconds)", duration.as_secs_f64()).green()
+                format!(
+                    "✓ Recording stopped ({:.1} seconds)",
+                    duration.as_secs_f64()
+                )
+                .green()
             );
         }
         Err(e) => {
@@ -95,9 +93,7 @@ pub fn record_audio(
 fn build_recording_command(tool: &str, output: &Path, config: &Config) -> Result<Command> {
     let platform = detect_platform();
     let sample_rate = config.audio.sample_rate.to_string();
-    let output_str = output
-        .to_str()
-        .context("Invalid output path")?;
+    let output_str = output.to_str().context("Invalid output path")?;
 
     let mut cmd = Command::new(tool);
 
