@@ -1,17 +1,25 @@
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
-    http::HeaderMap,
-    response::Html,
-    routing::get,
     Router,
+    extract::{Form, Path, State},
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
 };
 use chrono::Local;
-use pulldown_cmark::{html as md_html, Options, Parser as MdParser};
+use pulldown_cmark::{Options, Parser as MdParser, html as md_html};
+use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
 use crate::database::Database;
 use crate::journal::{Entry, Journal};
+
+#[derive(Deserialize)]
+struct EntryForm {
+    title: String,
+    content: String,
+    journal: String,
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -29,6 +37,12 @@ pub fn run(db_path: &std::path::Path, port: u16) -> Result<()> {
         let app = Router::new()
             .route("/", get(index_handler))
             .route("/entry/{id}", get(entry_handler))
+            .route("/form/new", get(new_form_handler))
+            .route("/entries", post(create_handler))
+            .route(
+                "/entry/{id}/edit",
+                get(edit_form_handler).post(update_handler),
+            )
             .with_state(state);
 
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
@@ -59,7 +73,10 @@ async fn entry_handler(
     };
     let detail_html = match result {
         Ok(Some(entry)) => render_entry_detail(&entry),
-        _ => r#"<div class="placeholder"><div class="placeholder-text">ENTRY NOT FOUND</div></div>"#.to_string(),
+        _ => {
+            r#"<div class="placeholder"><div class="placeholder-text">ENTRY NOT FOUND</div></div>"#
+                .to_string()
+        }
     };
 
     // HTMX requests get just the partial; direct browser navigation gets the full page
@@ -77,6 +94,80 @@ async fn entry_handler(
 }
 
 const PLACEHOLDER_HTML: &str = r#"<div class="placeholder"><div class="placeholder-icon">✦</div><div class="placeholder-text">SELECT AN ENTRY TO VIEW</div></div>"#;
+
+fn hx_redirect(url: &str) -> Response {
+    (
+        StatusCode::OK,
+        [("HX-Redirect", url.to_string())],
+        String::new(),
+    )
+        .into_response()
+}
+
+async fn new_form_handler() -> Html<String> {
+    Html(render_entry_form(None))
+}
+
+async fn create_handler(State(state): State<AppState>, Form(data): Form<EntryForm>) -> Response {
+    let title = data.title.trim().to_string();
+    let title = if title.is_empty() {
+        None
+    } else {
+        Some(title.as_str())
+    };
+    let journal = if data.journal.trim().is_empty() {
+        "Personal"
+    } else {
+        data.journal.trim()
+    };
+
+    let result = {
+        let j = state.journal.lock().expect("journal lock poisoned");
+        j.create_entry(title, data.content.trim(), Some(journal))
+    };
+
+    match result {
+        Ok(id) => hx_redirect(&format!("/entry/{id}")),
+        Err(_) => Html(r#"<div class="placeholder"><div class="placeholder-text">ERROR SAVING ENTRY</div></div>"#.to_string()).into_response(),
+    }
+}
+
+async fn edit_form_handler(State(state): State<AppState>, Path(id): Path<i64>) -> Html<String> {
+    let result = {
+        let j = state.journal.lock().expect("journal lock poisoned");
+        j.get_entry(id)
+    };
+    Html(match result {
+        Ok(Some(entry)) => render_entry_form(Some(&entry)),
+        _ => {
+            r#"<div class="placeholder"><div class="placeholder-text">ENTRY NOT FOUND</div></div>"#
+                .to_string()
+        }
+    })
+}
+
+async fn update_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(data): Form<EntryForm>,
+) -> Response {
+    let title = data.title.trim().to_string();
+    let title = if title.is_empty() {
+        None
+    } else {
+        Some(title.as_str())
+    };
+
+    let result = {
+        let j = state.journal.lock().expect("journal lock poisoned");
+        j.update_entry(id, title, data.content.trim())
+    };
+
+    match result {
+        Ok(_) => hx_redirect(&format!("/entry/{id}")),
+        Err(_) => Html(r#"<div class="placeholder"><div class="placeholder-text">ERROR SAVING ENTRY</div></div>"#.to_string()).into_response(),
+    }
+}
 
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -137,6 +228,61 @@ fn render_entry_list(entries: &[Entry], active_id: Option<i64>) -> String {
         .join("")
 }
 
+fn render_entry_form(entry: Option<&Entry>) -> String {
+    let (action, heading, title_val, journal_val, content_val, cancel_target) = match entry {
+        Some(e) => (
+            format!("/entry/{}/edit", e.id),
+            "EDIT ENTRY",
+            escape_html(e.title.as_deref().unwrap_or("")),
+            escape_html(&e.journal),
+            escape_html(&e.content),
+            format!("/entry/{}", e.id),
+        ),
+        None => (
+            "/entries".to_string(),
+            "NEW ENTRY",
+            String::new(),
+            "Personal".to_string(),
+            String::new(),
+            "/".to_string(),
+        ),
+    };
+
+    format!(
+        r#"<div class="entry-form">
+  <div class="form-title-bar"><div class="form-heading">{heading}</div></div>
+  <form hx-post="{action}" hx-target='#entry-detail' hx-swap="innerHTML">
+    <div class="form-field">
+      <label class="form-label">TITLE (OPTIONAL)</label>
+      <input class="form-input" type="text" name="title" value="{title}" placeholder="Enter title..." autocomplete="off">
+    </div>
+    <div class="form-field">
+      <label class="form-label">JOURNAL</label>
+      <input class="form-input" type="text" name="journal" value="{journal}" autocomplete="off">
+    </div>
+    <div class="form-field">
+      <label class="form-label">CONTENT</label>
+      <textarea class="form-textarea" name="content" placeholder="Begin recording...">{content}</textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn-save" type="submit">SAVE ENTRY</button>
+      <button class="btn-cancel" type="button"
+        hx-get="{cancel}"
+        hx-target='#entry-detail'
+        hx-swap="innerHTML">{cancel_label}</button>
+    </div>
+  </form>
+</div>"#,
+        heading = heading,
+        action = action,
+        title = title_val,
+        journal = journal_val,
+        content = content_val,
+        cancel = cancel_target,
+        cancel_label = if entry.is_some() { "CANCEL" } else { "CANCEL" },
+    )
+}
+
 fn render_entry_detail(entry: &Entry) -> String {
     let title = entry.title.as_deref().unwrap_or("UNTITLED ENTRY");
     let local_ts = entry.timestamp.with_timezone(&Local);
@@ -150,7 +296,10 @@ fn render_entry_detail(entry: &Entry) -> String {
         concat!(
             r#"<div class="ed-header">"#,
             r#"<div class="ed-title">{title}</div>"#,
-            r#"<div class="ed-meta">{date} &nbsp;·&nbsp; {journal} &nbsp;·&nbsp; ID #{id}</div>"#,
+            r#"<div class="ed-meta-row">"#,
+            r#"<span class="ed-meta">{date} &nbsp;·&nbsp; {journal} &nbsp;·&nbsp; ID #{id}</span>"#,
+            r#"<button class="btn-edit" hx-get="/entry/{id}/edit" hx-target='#entry-detail' hx-swap="innerHTML">EDIT</button>"#,
+            r#"</div>"#,
             r#"</div>"#,
             r#"{audio}"#,
             r#"<div class="ed-content">{content}</div>"#,
@@ -183,7 +332,7 @@ fn full_page(list_html: &str, count: usize, detail_html: &str) -> String {
   <div class="top-bar">CAPTAIN'S LOG</div>
 
   <div class="sidebar">
-    <div class="sb-btn" style="background:var(--orange)">ALL ENTRIES</div>
+    <div class="sb-btn" style="background:var(--orange)" hx-get="/form/new" hx-target='#entry-detail' hx-swap="innerHTML">NEW ENTRY</div>
     <div class="sb-filler" style="background:var(--purple);height:40px"></div>
     <div class="sb-filler" style="background:var(--blue);height:40px"></div>
     <div class="sb-filler" style="background:var(--orange);height:80px"></div>
@@ -525,4 +674,111 @@ html, body {
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+
+/* Entry detail meta row */
+.ed-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* Edit button */
+.btn-edit {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--orange);
+  color: var(--orange);
+  padding: 4px 14px;
+  font-family: 'Antonio', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.btn-edit:hover { background: var(--orange); color: #000; }
+
+/* Forms */
+.entry-form { padding: 20px 28px; }
+
+.form-title-bar {
+  border-bottom: 2px solid var(--orange);
+  padding-bottom: 14px;
+  margin-bottom: 22px;
+}
+
+.form-heading {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--orange);
+  text-transform: uppercase;
+}
+
+.form-field { margin-bottom: 18px; }
+
+.form-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--orange);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.form-input, .form-textarea {
+  width: 100%;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  color: var(--tan);
+  font-family: 'Antonio', 'Arial Narrow', Arial, sans-serif;
+  font-size: 16px;
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.form-input:focus, .form-textarea:focus { border-color: var(--orange); }
+
+.form-textarea {
+  resize: vertical;
+  min-height: 260px;
+  line-height: 1.6;
+  font-family: 'Exo 2', 'Segoe UI', system-ui, sans-serif;
+}
+
+.form-actions { display: flex; gap: 10px; margin-top: 4px; }
+
+.btn-save {
+  background: var(--orange);
+  color: #000;
+  border: none;
+  padding: 10px 24px;
+  font-family: 'Antonio', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.btn-save:hover { background: var(--tan); }
+
+.btn-cancel {
+  background: transparent;
+  color: #666;
+  border: 1px solid #333;
+  padding: 10px 24px;
+  font-family: 'Antonio', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.btn-cancel:hover { border-color: var(--tan); color: var(--tan); }
 "#;
