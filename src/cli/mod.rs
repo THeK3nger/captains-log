@@ -11,7 +11,8 @@ use crate::export::{ExportFilters, Exporter};
 use crate::import::Importer;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, Utc};
+use chrono_tz::Tz;
 use clap::Subcommand;
 use colored::*;
 use dateparser::parse_relative_date;
@@ -252,14 +253,22 @@ pub fn handle_command(
                 for entry in entries {
                     println!(
                         "{}",
-                        format_entry_summary(&entry, config.display.stardate_mode)
+                        format_entry_summary(
+                            &entry,
+                            config.display.stardate_mode,
+                            config.display.timezone.as_deref()
+                        )
                     );
                 }
             }
         }
         Commands::Show { id } => match journal.get_entry(id)? {
             Some(entry) => {
-                print_entry(&entry, config.display.stardate_mode);
+                print_entry(
+                    &entry,
+                    config.display.stardate_mode,
+                    config.display.timezone.as_deref(),
+                );
             }
             None => println!("{}", format!("Entry {} not found", id).red()),
         },
@@ -281,7 +290,11 @@ pub fn handle_command(
                 for entry in entries {
                     println!(
                         "{}",
-                        format_entry_summary(&entry, config.display.stardate_mode)
+                        format_entry_summary(
+                            &entry,
+                            config.display.stardate_mode,
+                            config.display.timezone.as_deref()
+                        )
                     );
                 }
             }
@@ -292,7 +305,11 @@ pub fn handle_command(
                     // Show the entry to be deleted
                     println!("{}", "Entry to be deleted:".yellow().bold());
                     println!();
-                    print_entry(&entry, config.display.stardate_mode);
+                    print_entry(
+                        &entry,
+                        config.display.stardate_mode,
+                        config.display.timezone.as_deref(),
+                    );
                     println!();
 
                     // Ask for confirmation
@@ -955,7 +972,17 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
     Ok(())
 }
 
-fn print_entry(entry: &Entry, stardate_mode: bool) {
+/// Convert a UTC timestamp to the configured (or system local) timezone.
+fn to_local_dt(utc: &DateTime<Utc>, timezone: Option<&str>) -> DateTime<FixedOffset> {
+    if let Some(tz_str) = timezone {
+        if let Ok(tz) = tz_str.parse::<Tz>() {
+            return utc.with_timezone(&tz).fixed_offset();
+        }
+    }
+    utc.with_timezone(&Local).fixed_offset()
+}
+
+fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) {
     let width = get_wrap_width();
     println!("{}", "─".repeat(width as usize).bright_blue());
     println!(
@@ -973,8 +1000,7 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
         println!(
             "{}: {}",
             "Date".cyan().bold(),
-            entry
-                .timestamp
+            to_local_dt(&entry.timestamp, timezone)
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string()
                 .white()
@@ -1004,7 +1030,7 @@ fn print_entry(entry: &Entry, stardate_mode: bool) {
     println!("{}", "─".repeat(width as usize).bright_blue());
 }
 
-fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
+fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) -> String {
     // Strip newlines and limit content preview to 40 chars.
     let content_preview = if entry.content.len() > 40 {
         format!("{}...", &entry.content[..40].replace('\n', " "))
@@ -1018,8 +1044,7 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool) -> String {
         let stardate = entry.timestamp.to_stardate();
         format_stardate(stardate)
     } else {
-        entry
-            .timestamp
+        to_local_dt(&entry.timestamp, timezone)
             .format("%Y-%m-%d %H:%M")
             .to_string()
             .white()
@@ -1252,9 +1277,10 @@ fn show_calendar(
     let entries = journal.list_entries_for_month_filtered(year, month, journal_filter)?;
 
     // Create a map of day -> entry count
+    let tz = config.display.timezone.as_deref();
     let mut day_counts = std::collections::HashMap::new();
     for entry in &entries {
-        let day = entry.timestamp.day();
+        let day = to_local_dt(&entry.timestamp, tz).day();
         *day_counts.entry(day).or_insert(0) += 1;
     }
 
@@ -1332,7 +1358,7 @@ fn show_calendar(
         for entry in entries {
             println!(
                 "{}",
-                format_entry_summary(&entry, config.display.stardate_mode)
+                format_entry_summary(&entry, config.display.stardate_mode, tz)
             );
         }
     }
