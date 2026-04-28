@@ -36,6 +36,7 @@ pub fn run(db_path: &std::path::Path, port: u16) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async move {
         let app = Router::new()
             .route("/", get(index_handler))
+            .route("/placeholder", get(placeholder_handler))
             .route("/entry/{id}", get(entry_handler))
             .route("/form/new", get(new_form_handler))
             .route("/entries", post(create_handler))
@@ -102,6 +103,10 @@ fn hx_redirect(url: &str) -> Response {
         String::new(),
     )
         .into_response()
+}
+
+async fn placeholder_handler() -> Html<String> {
+    Html(PLACEHOLDER_HTML.to_string())
 }
 
 async fn new_form_handler(State(state): State<AppState>) -> Html<String> {
@@ -248,7 +253,7 @@ fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
             String::new(),
             "Personal".to_string(),
             String::new(),
-            "/".to_string(),
+            "/placeholder".to_string(),
         ),
     };
 
