@@ -104,8 +104,12 @@ fn hx_redirect(url: &str) -> Response {
         .into_response()
 }
 
-async fn new_form_handler() -> Html<String> {
-    Html(render_entry_form(None))
+async fn new_form_handler(State(state): State<AppState>) -> Html<String> {
+    let journals = {
+        let j = state.journal.lock().expect("journal lock poisoned");
+        j.list_journals().unwrap_or_default()
+    };
+    Html(render_entry_form(None, &journals))
 }
 
 async fn create_handler(State(state): State<AppState>, Form(data): Form<EntryForm>) -> Response {
@@ -133,12 +137,12 @@ async fn create_handler(State(state): State<AppState>, Form(data): Form<EntryFor
 }
 
 async fn edit_form_handler(State(state): State<AppState>, Path(id): Path<i64>) -> Html<String> {
-    let result = {
+    let (result, journals) = {
         let j = state.journal.lock().expect("journal lock poisoned");
-        j.get_entry(id)
+        (j.get_entry(id), j.list_journals().unwrap_or_default())
     };
     Html(match result {
-        Ok(Some(entry)) => render_entry_form(Some(&entry)),
+        Ok(Some(entry)) => render_entry_form(Some(&entry), &journals),
         _ => {
             r#"<div class="placeholder"><div class="placeholder-text">ENTRY NOT FOUND</div></div>"#
                 .to_string()
@@ -228,7 +232,7 @@ fn render_entry_list(entries: &[Entry], active_id: Option<i64>) -> String {
         .join("")
 }
 
-fn render_entry_form(entry: Option<&Entry>) -> String {
+fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
     let (action, heading, title_val, journal_val, content_val, cancel_target) = match entry {
         Some(e) => (
             format!("/entry/{}/edit", e.id),
@@ -248,6 +252,12 @@ fn render_entry_form(entry: Option<&Entry>) -> String {
         ),
     };
 
+    let datalist_options = journals
+        .iter()
+        .map(|j| format!(r#"<option value="{}">"#, escape_html(j)))
+        .collect::<Vec<_>>()
+        .join("");
+
     format!(
         r#"<div class="entry-form">
   <div class="form-title-bar"><div class="form-heading">{heading}</div></div>
@@ -258,7 +268,8 @@ fn render_entry_form(entry: Option<&Entry>) -> String {
     </div>
     <div class="form-field">
       <label class="form-label">JOURNAL</label>
-      <input class="form-input" type="text" name="journal" value="{journal}" autocomplete="off">
+      <input class="form-input" type="text" name="journal" value="{journal}" list="journal-list" autocomplete="off">
+      <datalist id="journal-list">{options}</datalist>
     </div>
     <div class="form-field">
       <label class="form-label">CONTENT</label>
@@ -269,7 +280,7 @@ fn render_entry_form(entry: Option<&Entry>) -> String {
       <button class="btn-cancel" type="button"
         hx-get="{cancel}"
         hx-target='#entry-detail'
-        hx-swap="innerHTML">{cancel_label}</button>
+        hx-swap="innerHTML">CANCEL</button>
     </div>
   </form>
 </div>"#,
@@ -279,7 +290,7 @@ fn render_entry_form(entry: Option<&Entry>) -> String {
         journal = journal_val,
         content = content_val,
         cancel = cancel_target,
-        cancel_label = if entry.is_some() { "CANCEL" } else { "CANCEL" },
+        options = datalist_options,
     )
 }
 

@@ -285,6 +285,15 @@ impl Journal {
         Ok(rows_affected > 0)
     }
 
+    pub fn list_journals(&self) -> Result<Vec<String>> {
+        let conn = self.db.connection();
+        let mut stmt = conn.prepare("SELECT DISTINCT journal FROM entries ORDER BY journal ASC")?;
+        let journals = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(journals)
+    }
+
     pub fn move_entry(&self, id: i64, new_journal: &str) -> Result<bool> {
         let conn = self.db.connection();
         let now = Utc::now();
