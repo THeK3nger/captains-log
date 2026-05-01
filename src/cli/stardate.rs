@@ -46,11 +46,14 @@ impl Stardate for DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Timelike};
+    use chrono::{NaiveDate, TimeZone, Timelike};
 
     #[test]
     fn test_to_stardate() {
-        let dt = Utc.ymd(2025, 9, 15).and_hms(15, 30, 0);
+        let dt = Utc
+            .with_ymd_and_hms(2025, 9, 15, 15, 30, 0)
+            .single()
+            .expect("valid timestamp");
         let sd = dt.to_stardate();
         println!("{}", sd);
         assert!((sd - 21557.645883).abs() < 0.0001);
@@ -61,14 +64,20 @@ mod tests {
         let sd = 21557.645883;
         let dt = DateTime::<Utc>::from_stardate(sd);
         // Check that the date is approximately correct, let's ignore seconds for simplicity
-        assert_eq!(dt.date(), Utc.ymd(2025, 9, 15));
+        assert_eq!(
+            dt.date_naive(),
+            NaiveDate::from_ymd_opt(2025, 9, 15).expect("valid date")
+        );
         assert_eq!(dt.time().hour(), 15);
         assert_eq!(dt.time().minute(), 30);
     }
 
     #[test]
     fn test_round_trip() {
-        let original_dt = Utc.ymd(2024, 6, 1).and_hms(12, 0, 0);
+        let original_dt = Utc
+            .with_ymd_and_hms(2024, 6, 1, 12, 0, 0)
+            .single()
+            .expect("valid timestamp");
         let sd = original_dt.to_stardate();
         let converted_dt = DateTime::<Utc>::from_stardate(sd);
         assert_eq!(original_dt, converted_dt);

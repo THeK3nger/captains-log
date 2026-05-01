@@ -166,14 +166,34 @@ async fn update_handler(
     } else {
         Some(title.as_str())
     };
+    let journal = if data.journal.trim().is_empty() {
+        "Personal"
+    } else {
+        data.journal.trim()
+    };
 
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
-        j.update_entry(id, title, data.content.trim())
+        match j.get_entry(id) {
+            Ok(Some(entry)) => j.update_entry_with_metadata(
+                id,
+                title,
+                data.content.trim(),
+                journal,
+                entry.timestamp,
+            ),
+            Ok(None) => Ok(false),
+            Err(err) => Err(err),
+        }
     };
 
     match result {
-        Ok(_) => hx_redirect(&format!("/entry/{id}")),
+        Ok(true) => hx_redirect(&format!("/entry/{id}")),
+        Ok(false) => Html(
+            r#"<div class="placeholder"><div class="placeholder-text">ENTRY NOT FOUND</div></div>"#
+                .to_string(),
+        )
+        .into_response(),
         Err(_) => Html(r#"<div class="placeholder"><div class="placeholder-text">ERROR SAVING ENTRY</div></div>"#.to_string()).into_response(),
     }
 }

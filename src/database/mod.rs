@@ -59,6 +59,11 @@ impl Database {
             [],
         )?;
 
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entries_journal_timestamp ON entries(journal, timestamp)",
+            [],
+        )?;
+
         Ok(())
     }
 

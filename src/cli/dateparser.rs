@@ -1,3 +1,5 @@
+use crate::journal::EntryFilters;
+use anyhow::Result;
 use chrono::{Datelike, Duration, Local, NaiveDate};
 
 /// Parse relative date strings into NaiveDate
@@ -121,6 +123,27 @@ pub fn parse_relative_date(input: &str) -> Result<NaiveDate, String> {
         _ => chrono::NaiveDate::parse_from_str(&input, "%Y-%m-%d")
             .map_err(|_| format!("Could not parse: {}", input)),
     }
+}
+
+pub fn parse_entry_filters(
+    date: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+    journal: Option<&str>,
+) -> Result<EntryFilters> {
+    Ok(EntryFilters {
+        date: parse_optional_date(date, "date")?,
+        since: parse_optional_date(since, "since date")?,
+        until: parse_optional_date(until, "until date")?,
+        journal: journal.map(str::to_string),
+    })
+}
+
+fn parse_optional_date(value: Option<&str>, label: &str) -> Result<Option<NaiveDate>> {
+    value
+        .map(parse_relative_date)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Invalid {label}: {e}"))
 }
 
 /// Helper function to get days in a month

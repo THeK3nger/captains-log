@@ -1,10 +1,16 @@
 use std::fmt;
 
 use crate::database::Database;
-use anyhow::Result;
-use chrono::{DateTime, NaiveDate, Utc};
-use rusqlite::{Row, params};
+use anyhow::{Context, Result};
+use chrono::{DateTime, Days, NaiveDate, Utc};
+use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
+
+const ENTRY_SELECT: &str = r#"
+    SELECT id, timestamp, title, content, audio_path, image_paths,
+           journal, created_at, updated_at
+    FROM entries
+"#;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Entry {
@@ -43,19 +49,14 @@ impl Entry {
     }
 
     pub fn get_summary(&self, summary_size: usize) -> String {
-        let content_preview = if self.content.len() > summary_size {
-            format!("{}...", &self.content[..summary_size])
-        } else {
-            self.content.to_string()
-        };
-        let title = self.title.as_deref();
-        if title.is_some() {
+        let content_preview = truncate_with_ellipsis(&self.content, summary_size);
+        if let Some(title) = self.title.as_deref() {
             format!(
                 "[{}] {} [{}] - {} - {}",
                 self.id,
                 self.timestamp.format("%Y-%m-%d %H:%M"),
                 self.journal,
-                title.unwrap(),
+                title,
                 content_preview
             )
         } else {
@@ -67,6 +68,94 @@ impl Entry {
                 content_preview
             )
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EntryFilters {
+    pub date: Option<NaiveDate>,
+    pub since: Option<NaiveDate>,
+    pub until: Option<NaiveDate>,
+    pub journal: Option<String>,
+}
+
+impl EntryFilters {
+    pub fn is_active(&self) -> bool {
+        self.date.is_some()
+            || self.since.is_some()
+            || self.until.is_some()
+            || self.journal.is_some()
+    }
+
+    pub fn for_month(year: i32, month: u32, journal: Option<&str>) -> Result<Self> {
+        let month_start = NaiveDate::from_ymd_opt(year, month, 1)
+            .with_context(|| format!("Invalid year/month combination: {year}-{month:02}"))?;
+        let (next_year, next_month) = if month == 12 {
+            (year + 1, 1)
+        } else {
+            (year, month + 1)
+        };
+        let next_month_start =
+            NaiveDate::from_ymd_opt(next_year, next_month, 1).with_context(|| {
+                format!("Invalid year/month combination: {next_year}-{next_month:02}")
+            })?;
+        let month_end = next_month_start
+            .checked_sub_days(Days::new(1))
+            .context("Failed to calculate month end")?;
+
+        Ok(Self {
+            since: Some(month_start),
+            until: Some(month_end),
+            journal: journal.map(str::to_string),
+            ..Self::default()
+        })
+    }
+
+    fn timestamp_bounds(&self) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> {
+        let mut start = self.date.map(start_of_day_utc);
+        let mut end = self.date.map(next_day_start_utc).transpose()?;
+
+        if let Some(since) = self.since {
+            start = Some(match start {
+                Some(current) => current.max(start_of_day_utc(since)),
+                None => start_of_day_utc(since),
+            });
+        }
+
+        if let Some(until) = self.until {
+            let until_end = next_day_start_utc(until)?;
+            end = Some(match end {
+                Some(current) => current.min(until_end),
+                None => until_end,
+            });
+        }
+
+        Ok((start, end))
+    }
+}
+
+fn start_of_day_utc(date: NaiveDate) -> DateTime<Utc> {
+    DateTime::from_naive_utc_and_offset(
+        date.and_hms_opt(0, 0, 0)
+            .expect("midnight should always be valid"),
+        Utc,
+    )
+}
+
+fn next_day_start_utc(date: NaiveDate) -> Result<DateTime<Utc>> {
+    let next_day = date
+        .checked_add_days(Days::new(1))
+        .context("Failed to calculate next day")?;
+    Ok(start_of_day_utc(next_day))
+}
+
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let preview: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{}...", preview.trim_end())
+    } else {
+        preview
     }
 }
 
@@ -157,20 +246,11 @@ impl Journal {
 
     pub fn get_entry(&self, id: i64) -> Result<Option<Entry>> {
         let conn = self.db.connection();
+        let mut stmt = conn.prepare(&format!("{ENTRY_SELECT} WHERE id = ?1"))?;
 
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    journal, created_at, updated_at
-             FROM entries WHERE id = ?1",
-        )?;
-
-        let mut entry_iter = stmt.query_map([id], Entry::from_row)?;
-
-        if let Some(entry) = entry_iter.next() {
-            return Ok(Some(entry?));
-        }
-
-        Ok(None)
+        stmt.query_row([id], Entry::from_row)
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn list_entries(&self) -> Result<Vec<Entry>> {
@@ -182,75 +262,23 @@ impl Journal {
         order_field: &str,
         order_direction: &str,
     ) -> Result<Vec<Entry>> {
-        let conn = self.db.connection();
+        let query = format!("{ENTRY_SELECT} ORDER BY {order_field} {order_direction}",);
 
-        let query = format!(
-            "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    journal, created_at, updated_at
-             FROM entries ORDER BY {} {}",
-            order_field, order_direction
-        );
-
-        let mut stmt = conn.prepare(&query)?;
-        let entry_iter = stmt.query_map([], Entry::from_row)?;
-
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
-        }
-
-        Ok(entries)
+        self.collect_entries(&query, [])
     }
 
     pub fn search_entries(&self, query: &str) -> Result<Vec<Entry>> {
-        let conn = self.db.connection();
         let search_pattern = format!("%{}%", query);
-
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, title, content, audio_path, image_paths,
-                    journal, created_at, updated_at
-             FROM entries
-             WHERE content LIKE ?1 OR title LIKE ?1
-             ORDER BY created_at DESC",
-        )?;
-
-        let entry_iter = stmt.query_map([&search_pattern], Entry::from_row)?;
-
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
-        }
-
-        Ok(entries)
+        let query = format!(
+            "{ENTRY_SELECT} WHERE content LIKE ?1 OR title LIKE ?1 ORDER BY created_at DESC"
+        );
+        self.collect_entries(&query, [&search_pattern])
     }
 
     pub fn delete_entry(&self, id: i64) -> Result<bool> {
         let conn = self.db.connection();
 
         let rows_affected = conn.execute("DELETE FROM entries WHERE id = ?1", [id])?;
-
-        Ok(rows_affected > 0)
-    }
-
-    /// Update entry's title and content. Returns true if the entry was found and updated.
-    ///
-    /// Note: This is currenltly replaced by `update_entry_with_metadata` which also updates journal and timestamp.
-    ///
-    /// # Arguments
-    /// * `id` - The ID of the entry to update.
-    /// * `title` - The new title for the entry. Use `None` to clear the title.
-    /// * `content` - The new content for the entry.
-    ///
-    /// # Returns
-    /// * `Result<bool>` - Ok(true) if the entry was updated, Ok(false) if not found, Err on error.
-    pub fn update_entry(&self, id: i64, title: Option<&str>, content: &str) -> Result<bool> {
-        let conn = self.db.connection();
-        let now = Utc::now();
-
-        let rows_affected = conn.execute(
-            "UPDATE entries SET title = ?1, content = ?2, updated_at = ?3 WHERE id = ?4",
-            params![title, content, now, id],
-        )?;
 
         Ok(rows_affected > 0)
     }
@@ -306,67 +334,52 @@ impl Journal {
         Ok(rows_affected > 0)
     }
 
-    pub fn list_entries_filtered(
-        &self,
-        date: Option<&NaiveDate>,
-        since: Option<&NaiveDate>,
-        until: Option<&NaiveDate>,
-        journal: Option<&str>,
-    ) -> Result<Vec<Entry>> {
-        self.list_entries_filtered_with_order(date, since, until, journal, "timestamp", "DESC")
+    pub fn list_entries_filtered(&self, filters: &EntryFilters) -> Result<Vec<Entry>> {
+        self.list_entries_filtered_with_order(filters, "timestamp", "DESC")
     }
 
     pub fn list_entries_filtered_with_order(
         &self,
-        date: Option<&NaiveDate>,
-        since: Option<&NaiveDate>,
-        until: Option<&NaiveDate>,
-        journal: Option<&str>,
+        filters: &EntryFilters,
         order_field: &str,
         order_direction: &str,
     ) -> Result<Vec<Entry>> {
-        let conn = self.db.connection();
-        let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries".to_string();
+        let (start, end) = filters.timestamp_bounds()?;
+        let journal = filters.journal.as_deref();
+        let mut query = ENTRY_SELECT.to_string();
         let mut conditions = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        if let Some(date) = date {
-            conditions.push("DATE(timestamp) = ?");
-            params.push(Box::new(date.to_string()));
+        if start.is_some() {
+            conditions.push("timestamp >= ?");
         }
-
-        if let Some(since_date) = since {
-            conditions.push("DATE(timestamp) >= ?");
-            params.push(Box::new(since_date.to_string()));
+        if end.is_some() {
+            conditions.push("timestamp < ?");
         }
-
-        if let Some(until_date) = until {
-            conditions.push("DATE(timestamp) <= ?");
-            params.push(Box::new(until_date.to_string()));
-        }
-
-        if let Some(journal_str) = journal {
+        if journal.is_some() {
             conditions.push("journal = ?");
-            params.push(Box::new(journal_str.to_string()));
         }
 
-        if !conditions.is_empty() {
+        if filters.is_active() {
             query.push_str(" WHERE ");
             query.push_str(&conditions.join(" AND "));
         }
 
-        query.push_str(&format!(" ORDER BY {} {}", order_field, order_direction));
+        query.push_str(&format!(" ORDER BY {order_field} {order_direction}"));
 
-        let mut stmt = conn.prepare(&query)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let entry_iter = stmt.query_map(param_refs.as_slice(), Entry::from_row)?;
-
-        let mut entries = Vec::new();
-        for entry in entry_iter {
-            entries.push(entry?);
+        match (start.as_ref(), end.as_ref(), journal) {
+            (Some(start), Some(end), Some(journal)) => {
+                self.collect_entries(&query, params![start, end, journal])
+            }
+            (Some(start), Some(end), None) => self.collect_entries(&query, params![start, end]),
+            (Some(start), None, Some(journal)) => {
+                self.collect_entries(&query, params![start, journal])
+            }
+            (Some(start), None, None) => self.collect_entries(&query, params![start]),
+            (None, Some(end), Some(journal)) => self.collect_entries(&query, params![end, journal]),
+            (None, Some(end), None) => self.collect_entries(&query, params![end]),
+            (None, None, Some(journal)) => self.collect_entries(&query, params![journal]),
+            (None, None, None) => self.collect_entries(&query, []),
         }
-
-        Ok(entries)
     }
 
     pub fn list_entries_for_month(&self, year: i32, month: u32) -> Result<Vec<Entry>> {
@@ -379,24 +392,17 @@ impl Journal {
         month: u32,
         journal: Option<&str>,
     ) -> Result<Vec<Entry>> {
+        let filters = EntryFilters::for_month(year, month, journal)?;
+        self.list_entries_filtered_with_order(&filters, "timestamp", "ASC")
+    }
+
+    fn collect_entries<P>(&self, query: &str, params: P) -> Result<Vec<Entry>>
+    where
+        P: rusqlite::Params,
+    {
         let conn = self.db.connection();
-
-        let mut query = "SELECT id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at FROM entries WHERE strftime('%Y', timestamp) = ?1 AND strftime('%m', timestamp) = ?2".to_string();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![
-            Box::new(year.to_string()),
-            Box::new(format!("{:02}", month)),
-        ];
-
-        if let Some(journal_str) = journal {
-            query.push_str(" AND journal = ?");
-            params.push(Box::new(journal_str.to_string()));
-        }
-
-        query.push_str(" ORDER BY timestamp ASC");
-
-        let mut stmt = conn.prepare(&query)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let entry_iter = stmt.query_map(param_refs.as_slice(), Entry::from_row)?;
+        let mut stmt = conn.prepare(query)?;
+        let entry_iter = stmt.query_map(params, Entry::from_row)?;
 
         let mut entries = Vec::new();
         for entry in entry_iter {
@@ -404,5 +410,38 @@ impl Journal {
         }
 
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncation_is_unicode_safe() {
+        assert_eq!(truncate_with_ellipsis("naive cafe", 5), "naive...");
+        assert_eq!(truncate_with_ellipsis("caffe latte", 20), "caffe latte");
+        assert_eq!(
+            truncate_with_ellipsis("caffe e cornetto ☕", 17),
+            "caffe e cornetto..."
+        );
+    }
+
+    #[test]
+    fn exact_date_creates_day_bounds() {
+        let filters = EntryFilters {
+            date: NaiveDate::from_ymd_opt(2026, 5, 1),
+            ..EntryFilters::default()
+        };
+        let (start, end) = filters.timestamp_bounds().expect("bounds should resolve");
+
+        assert_eq!(
+            start.expect("start bound").date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 1).expect("valid date")
+        );
+        assert_eq!(
+            end.expect("end bound").date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 2).expect("valid date")
+        );
     }
 }

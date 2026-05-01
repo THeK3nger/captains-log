@@ -1,4 +1,4 @@
-use crate::cli::dateparser::parse_relative_date;
+use crate::cli::dateparser::parse_entry_filters;
 use crate::journal::{Entry, Journal};
 use anyhow::{Context, Result};
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
@@ -135,34 +135,15 @@ impl<'a> Exporter<'a> {
     /// Get entries for export, applying filters if provided
     fn get_entries_for_export(&self, filters: Option<ExportFilters>) -> Result<Vec<Entry>> {
         if let Some(filters) = filters {
-            // Parse date filters using .map().transpose() pattern
-            let date = filters
-                .date
-                .as_deref()
-                .map(parse_relative_date)
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("Invalid date filter: {}", e))?;
-            let since = filters
-                .since
-                .as_deref()
-                .map(parse_relative_date)
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("Invalid since filter: {}", e))?;
-            let until = filters
-                .until
-                .as_deref()
-                .map(parse_relative_date)
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("Invalid until filter: {}", e))?;
-
-            self.journal.list_entries_filtered_with_order(
-                date.as_ref(),
-                since.as_ref(),
-                until.as_ref(),
+            let parsed_filters = parse_entry_filters(
+                filters.date.as_deref(),
+                filters.since.as_deref(),
+                filters.until.as_deref(),
                 filters.journal.as_deref(),
-                "timestamp",
-                "ASC",
-            )
+            )?;
+
+            self.journal
+                .list_entries_filtered_with_order(&parsed_filters, "timestamp", "ASC")
         } else {
             self.journal.list_entries_with_order("timestamp", "ASC")
         }

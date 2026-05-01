@@ -15,7 +15,7 @@ use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, Utc};
 use chrono_tz::Tz;
 use clap::Subcommand;
 use colored::*;
-use dateparser::parse_relative_date;
+use dateparser::{parse_entry_filters, parse_relative_date};
 use formatting::render_markdown;
 use std::env;
 use std::fs;
@@ -209,35 +209,15 @@ pub fn handle_command(
             journal: list_journal,
         } => {
             let journal_filter = list_journal.as_deref().or(global_journal);
+            let filters = parse_entry_filters(
+                date.as_deref(),
+                since.as_deref(),
+                until.as_deref(),
+                journal_filter,
+            )?;
 
-            // Parse date filters using .map().transpose() pattern
-            let date_filter = date
-                .as_deref()
-                .map(parse_relative_date)
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("Invalid date: {}", e))?;
-            let since_filter = since
-                .as_deref()
-                .map(parse_relative_date)
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("Invalid since date: {}", e))?;
-            let until_filter = until
-                .as_deref()
-                .map(parse_relative_date)
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("Invalid until date: {}", e))?;
-
-            let entries = if date_filter.is_some()
-                || since_filter.is_some()
-                || until_filter.is_some()
-                || journal_filter.is_some()
-            {
-                journal.list_entries_filtered(
-                    date_filter.as_ref(),
-                    since_filter.as_ref(),
-                    until_filter.as_ref(),
-                    journal_filter,
-                )?
+            let entries = if filters.is_active() {
+                journal.list_entries_filtered(&filters)?
             } else {
                 journal.list_entries()?
             };
@@ -1032,11 +1012,7 @@ fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) {
 
 fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) -> String {
     // Strip newlines and limit content preview to 40 chars.
-    let content_preview = if entry.content.len() > 40 {
-        format!("{}...", &entry.content[..40].replace('\n', " "))
-    } else {
-        entry.content.replace('\n', " ")
-    };
+    let content_preview = truncate_preview(&entry.content.replace('\n', " "), 40);
 
     let id = format!("[{}]", entry.id).bright_blue().bold();
 
@@ -1098,6 +1074,38 @@ fn format_stardate(stardate: f64) -> String {
     format!("{}{}", head.white(), tail.bright_black())
 }
 
+fn truncate_preview(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let preview: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{}...", preview.trim_end())
+    } else {
+        preview
+    }
+}
+
+fn parse_entry_body(body: &str) -> (Option<String>, String) {
+    let trimmed_body = body.trim();
+    if trimmed_body.is_empty() {
+        return (None, String::new());
+    }
+
+    let mut lines = body.lines();
+    let Some(first_line) = lines.next() else {
+        return (None, String::new());
+    };
+    let first_line = first_line.trim();
+
+    if let Some(title) = first_line.strip_prefix("# ") {
+        let content = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+        let title = title.trim();
+        let title = (!title.is_empty()).then(|| title.to_string());
+        (title, content)
+    } else {
+        (None, trimmed_body.to_string())
+    }
+}
+
 fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config) -> Result<()> {
     // Create a temporary file for the new entry
     let temp_dir = env::temp_dir();
@@ -1122,35 +1130,10 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
 
     // Read the edited content
     let edited_content = fs::read_to_string(&temp_file)?;
-    let lines: Vec<&str> = edited_content.lines().collect();
-
-    // Parse title and content
-    let (title, content) = if lines.is_empty() {
-        (None, String::new())
-    } else {
-        let first_line = lines[0].trim();
-        if first_line.is_empty() && lines.len() == 1 {
-            // If the only line is empty, treat as empty content
-            (None, String::new())
-        } else if first_line.starts_with("# ") && lines.len() == 1 {
-            // If only title is present
-            (
-                Some(first_line.strip_prefix("# ").unwrap().trim()),
-                String::new(),
-            )
-        } else if first_line.starts_with("# ") && lines.len() > 1 {
-            // If title and content are present
-            let title = first_line.strip_prefix("# ").unwrap().trim();
-            let content = lines[1..].join("\n").trim().to_string();
-            (Some(title), content)
-        } else {
-            // No title, all content
-            (None, edited_content.trim().to_string())
-        }
-    };
+    let (title, content) = parse_entry_body(&edited_content);
 
     // Check if the content is empty
-    if content.is_empty() && (title.is_none() || title.as_ref().unwrap().is_empty()) {
+    if content.is_empty() && title.is_none() {
         println!(
             "{}",
             "Entry creation cancelled - no content provided".yellow()
@@ -1161,7 +1144,7 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
     }
 
     // Create the entry
-    let id = journal.create_entry(title, &content, journal_category)?;
+    let id = journal.create_entry(title.as_deref(), &content, journal_category)?;
     println!("{}", format!("Entry {} created successfully", id).green());
 
     // Clean up temp file
@@ -1210,38 +1193,12 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
     let (metadata, body) = parse_frontmatter(&edited_content).context(
         "Failed to parse entry. Make sure the YAML frontmatter is properly formatted with '---' delimiters",
     )?;
-
-    let lines: Vec<&str> = body.lines().collect();
-
-    // Parse title and content from the body
-    let (title, content) = if lines.is_empty() {
-        (None, String::new())
-    } else {
-        let first_line = lines[0].trim();
-        if first_line.is_empty() && lines.len() == 1 {
-            // If the only line is empty, treat as empty content
-            (None, String::new())
-        } else if first_line.starts_with("# ") && lines.len() == 1 {
-            // If only title is present
-            (
-                Some(first_line.strip_prefix("# ").unwrap().trim()),
-                String::new(),
-            )
-        } else if first_line.starts_with("# ") && lines.len() > 1 {
-            // If title and content are present
-            let title = first_line.strip_prefix("# ").unwrap().trim();
-            let content = lines[1..].join("\n").trim().to_string();
-            (Some(title), content)
-        } else {
-            // No title, all content
-            (None, body.trim().to_string())
-        }
-    };
+    let (title, content) = parse_entry_body(&body);
 
     // Update the entry with metadata
     if journal.update_entry_with_metadata(
         id,
-        title,
+        title.as_deref(),
         &content,
         &metadata.journal,
         metadata.timestamp,

@@ -40,10 +40,9 @@ pub fn record_audio(config: &Config, output_path: &Path, max_duration: u64) -> R
 
     // Spawn signal handler thread
     thread::spawn(move || {
-        let mut signals = Signals::new(&[SIGINT]).expect("Failed to register signal handler");
-        for _ in signals.forever() {
+        let mut signals = Signals::new([SIGINT]).expect("Failed to register signal handler");
+        if signals.forever().next().is_some() {
             interrupted_clone.store(true, Ordering::Relaxed);
-            break;
         }
     });
 
