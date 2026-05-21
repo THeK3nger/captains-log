@@ -6,7 +6,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Local;
+use chrono::{Local, LocalResult, NaiveDateTime, TimeZone, Utc};
 use pulldown_cmark::{Options, Parser as MdParser, html as md_html};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,7 @@ struct EntryForm {
     title: String,
     content: String,
     journal: String,
+    timestamp: Option<String>,
 }
 
 #[derive(Clone)]
@@ -175,13 +176,16 @@ async fn update_handler(
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
         match j.get_entry(id) {
-            Ok(Some(entry)) => j.update_entry_with_metadata(
-                id,
-                title,
-                data.content.trim(),
-                journal,
-                entry.timestamp,
-            ),
+            Ok(Some(entry)) => {
+                let timestamp = match data.timestamp.as_deref().map(str::trim) {
+                    Some("") | None => Ok(entry.timestamp),
+                    Some(value) => parse_local_form_timestamp(value),
+                };
+
+                timestamp.and_then(|timestamp| {
+                    j.update_entry_with_metadata(id, title, data.content.trim(), journal, timestamp)
+                })
+            }
             Ok(None) => Ok(false),
             Err(err) => Err(err),
         }
@@ -195,6 +199,17 @@ async fn update_handler(
         )
         .into_response(),
         Err(_) => Html(r#"<div class="placeholder"><div class="placeholder-text">ERROR SAVING ENTRY</div></div>"#.to_string()).into_response(),
+    }
+}
+
+fn parse_local_form_timestamp(value: &str) -> Result<chrono::DateTime<Utc>> {
+    let naive = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M"))?;
+
+    match Local.from_local_datetime(&naive) {
+        LocalResult::Single(dt) => Ok(dt.with_timezone(&Utc)),
+        LocalResult::Ambiguous(dt, _) => Ok(dt.with_timezone(&Utc)),
+        LocalResult::None => Err(anyhow::anyhow!("invalid local timestamp")),
     }
 }
 
@@ -258,24 +273,35 @@ fn render_entry_list(entries: &[Entry], active_id: Option<i64>) -> String {
 }
 
 fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
-    let (action, heading, title_val, journal_val, content_val, cancel_target) = match entry {
-        Some(e) => (
-            format!("/entry/{}/edit", e.id),
-            "EDIT ENTRY",
-            escape_html(e.title.as_deref().unwrap_or("")),
-            escape_html(&e.journal),
-            escape_html(&e.content),
-            format!("/entry/{}", e.id),
-        ),
-        None => (
-            "/entries".to_string(),
-            "NEW ENTRY",
-            String::new(),
-            "Personal".to_string(),
-            String::new(),
-            "/placeholder".to_string(),
-        ),
-    };
+    let (action, heading, title_val, journal_val, timestamp_field, content_val, cancel_target) =
+        match entry {
+            Some(e) => (
+                format!("/entry/{}/edit", e.id),
+                "EDIT ENTRY",
+                escape_html(e.title.as_deref().unwrap_or("")),
+                escape_html(&e.journal),
+                format!(
+                    r#"<div class="form-field">
+      <label class="form-label">DATE</label>
+      <input class="form-input" type="datetime-local" name="timestamp" value="{}" step="1">
+    </div>"#,
+                    e.timestamp
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%dT%H:%M:%S")
+                ),
+                escape_html(&e.content),
+                format!("/entry/{}", e.id),
+            ),
+            None => (
+                "/entries".to_string(),
+                "NEW ENTRY",
+                String::new(),
+                "Personal".to_string(),
+                String::new(),
+                String::new(),
+                "/placeholder".to_string(),
+            ),
+        };
 
     let datalist_options = journals
         .iter()
@@ -296,6 +322,7 @@ fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
       <input class="form-input" type="text" name="journal" value="{journal}" list="journal-list" autocomplete="off">
       <datalist id="journal-list">{options}</datalist>
     </div>
+    {timestamp_field}
     <div class="form-field">
       <label class="form-label">CONTENT</label>
       <textarea class="form-textarea" name="content" placeholder="Begin recording...">{content}</textarea>
@@ -313,6 +340,7 @@ fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
         action = action,
         title = title_val,
         journal = journal_val,
+        timestamp_field = timestamp_field,
         content = content_val,
         cancel = cancel_target,
         options = datalist_options,
