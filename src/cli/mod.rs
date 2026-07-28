@@ -21,6 +21,8 @@ use std::env;
 use std::fs;
 use std::process::Command;
 
+const DEFAULT_LIST_LIMIT: usize = 20;
+
 #[derive(Subcommand)]
 pub enum Commands {
     /// List all entries
@@ -40,6 +42,18 @@ pub enum Commands {
         /// Filter by journal category
         #[arg(long)]
         journal: Option<String>,
+
+        /// Maximum number of entries to show (defaults to display.entries_per_page or 20)
+        #[arg(short, long)]
+        limit: Option<usize>,
+
+        /// Show all matching entries
+        #[arg(long, conflicts_with = "limit")]
+        all: bool,
+
+        /// Show newest entries first
+        #[arg(long)]
+        newest_first: bool,
     },
 
     /// Show a specific entry by ID
@@ -207,7 +221,14 @@ pub fn handle_command(
             since,
             until,
             journal: list_journal,
+            limit,
+            all,
+            newest_first,
         } => {
+            if limit == Some(0) {
+                anyhow::bail!("--limit must be greater than 0");
+            }
+
             let journal_filter = list_journal.as_deref().or(global_journal);
             let filters = parse_entry_filters(
                 date.as_deref(),
@@ -216,7 +237,7 @@ pub fn handle_command(
                 journal_filter,
             )?;
 
-            let entries = if filters.is_active() {
+            let mut entries = if filters.is_active() {
                 journal.list_entries_filtered(&filters)?
             } else {
                 journal.list_entries()?
@@ -225,9 +246,43 @@ pub fn handle_command(
             if entries.is_empty() {
                 println!("{}", "No entries found".yellow());
             } else {
+                let total_entries = entries.len();
+                let effective_limit = if all {
+                    None
+                } else {
+                    Some(
+                        limit
+                            .or(config.display.entries_per_page)
+                            .unwrap_or(DEFAULT_LIST_LIMIT),
+                    )
+                };
+
+                if let Some(limit) = effective_limit {
+                    entries.truncate(limit);
+                }
+
+                if !newest_first {
+                    entries.reverse();
+                }
+
+                let shown_entries = entries.len();
+                let order_label = if newest_first {
+                    "newest first"
+                } else {
+                    "oldest to newest"
+                };
+
                 println!(
                     "{}",
-                    format!("Found {} entries:", entries.len()).green().bold()
+                    if shown_entries == total_entries {
+                        format!("Found {total_entries} entries ({order_label}):")
+                    } else {
+                        format!(
+                            "Found {total_entries} entries, showing latest {shown_entries} ({order_label}):"
+                        )
+                    }
+                    .green()
+                    .bold()
                 );
                 println!();
                 for entry in entries {
@@ -759,7 +814,11 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                     entries_per_page.to_string().green()
                 );
             } else {
-                println!("  entries_per_page: {} (no limit)", "auto".bright_black());
+                println!(
+                    "  entries_per_page: {} (default: {})",
+                    "auto".bright_black(),
+                    DEFAULT_LIST_LIMIT
+                );
             }
             if let Some(tz) = &config.display.timezone {
                 println!("  timezone: {}", tz.green());
@@ -856,12 +915,19 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
                         new_config.display.entries_per_page = None;
                         println!(
                             "{}",
-                            "Set display.entries_per_page to auto (no limit)".green()
+                            format!(
+                                "Set display.entries_per_page to auto (default: {})",
+                                DEFAULT_LIST_LIMIT
+                            )
+                            .green()
                         );
                     } else {
                         let per_page: usize = value
                             .parse()
                             .context("display.entries_per_page must be a number or 'auto'")?;
+                        if per_page == 0 {
+                            anyhow::bail!("display.entries_per_page must be greater than 0");
+                        }
                         new_config.display.entries_per_page = Some(per_page);
                         println!(
                             "{}",

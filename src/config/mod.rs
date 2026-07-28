@@ -96,7 +96,7 @@ impl Default for Config {
             display: DisplayConfig {
                 colors_enabled: true,
                 date_format: "%Y-%m-%d %H:%M:%S".to_string(),
-                entries_per_page: None,
+                entries_per_page: Some(20),
                 stardate_mode: false,
                 timezone: None,
             },
