@@ -78,7 +78,7 @@ fn run_whisper(whisper_cmd: &str, model_path: &Path, audio_path: &Path) -> Resul
     let audio_str = audio_path.to_str().context("Invalid audio path")?;
 
     let output = Command::new(whisper_cmd)
-        .args(&[
+        .args([
             "-m", model_str, // Model file
             "-nt",     // No timestamps in output
             audio_str, // Audio file (positional argument)

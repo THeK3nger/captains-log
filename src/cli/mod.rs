@@ -435,14 +435,17 @@ pub fn handle_command(
             until,
             journal: export_journal,
         } => {
-            handle_export_command(
-                journal,
-                output,
-                &format,
+            let filters = create_export_filters(
                 date,
                 since,
                 until,
                 export_journal.or_else(|| global_journal.map(str::to_string)),
+            );
+            handle_export_command(
+                journal,
+                output,
+                &format,
+                filters,
                 config.display.timezone.clone(),
             )?;
         }
@@ -491,13 +494,9 @@ fn handle_export_command(
     journal: &Journal,
     output_path: Option<String>,
     format: &str,
-    date: Option<String>,
-    since: Option<String>,
-    until: Option<String>,
-    journal_filter: Option<String>,
+    filters: Option<ExportFilters>,
     timezone: Option<String>,
 ) -> Result<()> {
-    let filters = create_export_filters(date, since, until, journal_filter);
     let exporter = Exporter::new(journal, timezone);
 
     match format.to_lowercase().as_str() {
@@ -568,9 +567,8 @@ fn handle_import_command(
     match format.to_lowercase().as_str() {
         "org" => {
             println!(
-                "{} {}",
-                "[EXPERIMENTAL]".yellow(),
-                "org-journal import is still very VERY experimental."
+                "{} org-journal import is still very VERY experimental.",
+                "[EXPERIMENTAL]".yellow()
             );
             println!("{}", format!("Importing from {}...", file_path).cyan());
 
@@ -600,9 +598,8 @@ fn handle_import_command(
         }
         "dayone" => {
             println!(
-                "{} {}",
-                "[EXPERIMENTAL]".yellow(),
-                "DayOne JSON import is still experimental."
+                "{} DayOne JSON import is still experimental.",
+                "[EXPERIMENTAL]".yellow()
             );
             println!("{}", format!("Importing from {}...", file_path).cyan());
 
@@ -718,11 +715,7 @@ fn handle_record_command(
         )
         .green()
     );
-    println!(
-        "  {}: {}",
-        "Duration".cyan(),
-        format!("{:.1}s", duration.as_secs_f64())
-    );
+    println!("  {}: {:.1}s", "Duration".cyan(), duration.as_secs_f64());
     println!("  {}: {}", "Audio".cyan(), relative_path.green());
 
     Ok(())
@@ -1020,10 +1013,10 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
 
 /// Convert a UTC timestamp to the configured (or system local) timezone.
 fn to_local_dt(utc: &DateTime<Utc>, timezone: Option<&str>) -> DateTime<FixedOffset> {
-    if let Some(tz_str) = timezone {
-        if let Ok(tz) = tz_str.parse::<Tz>() {
-            return utc.with_timezone(&tz).fixed_offset();
-        }
+    if let Some(tz_str) = timezone
+        && let Ok(tz) = tz_str.parse::<Tz>()
+    {
+        return utc.with_timezone(&tz).fixed_offset();
     }
     utc.with_timezone(&Local).fixed_offset()
 }

@@ -41,7 +41,7 @@ fn build_playback_command(tool: &str, audio_path: &Path) -> Result<Command> {
         }
         "ffplay" => {
             // FFmpeg audio player
-            cmd.args(&[
+            cmd.args([
                 "-nodisp",   // No video display
                 "-autoexit", // Exit when done
                 audio_str,
@@ -74,7 +74,7 @@ pub fn get_audio_duration(audio_path: &Path) -> Option<f64> {
     // Try using ffprobe if available
     if which::which("ffprobe").is_ok() {
         let output = Command::new("ffprobe")
-            .args(&[
+            .args([
                 "-v",
                 "error",
                 "-show_entries",

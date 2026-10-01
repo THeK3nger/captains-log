@@ -28,10 +28,10 @@ impl<'a> Exporter<'a> {
 
     /// Convert a UTC timestamp to the configured (or system local) timezone.
     fn to_local(&self, utc: &DateTime<Utc>) -> DateTime<FixedOffset> {
-        if let Some(tz_str) = &self.timezone {
-            if let Ok(tz) = tz_str.parse::<Tz>() {
-                return utc.with_timezone(&tz).fixed_offset();
-            }
+        if let Some(tz_str) = &self.timezone
+            && let Ok(tz) = tz_str.parse::<Tz>()
+        {
+            return utc.with_timezone(&tz).fixed_offset();
         }
         utc.with_timezone(&Local).fixed_offset()
     }

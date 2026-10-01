@@ -98,7 +98,7 @@ fn build_recording_command(tool: &str, output: &Path, config: &Config) -> Result
 
     match (tool, platform) {
         ("sox", Platform::MacOS) | ("sox", Platform::Linux) => {
-            cmd.args(&[
+            cmd.args([
                 "-d", // Default device
                 "-r",
                 &sample_rate,
@@ -110,7 +110,7 @@ fn build_recording_command(tool: &str, output: &Path, config: &Config) -> Result
             ]);
         }
         ("arecord", Platform::Linux) => {
-            cmd.args(&[
+            cmd.args([
                 "-f",
                 "S16_LE", // 16-bit little-endian
                 "-c",
@@ -133,7 +133,7 @@ fn build_recording_command(tool: &str, output: &Path, config: &Config) -> Result
                 Platform::Windows => "audio=\"Microphone\"",
             };
 
-            cmd.args(&[
+            cmd.args([
                 "-f",
                 input_device,
                 "-i",

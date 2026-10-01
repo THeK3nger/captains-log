@@ -71,6 +71,8 @@ impl Entry {
     }
 }
 
+type TimestampBounds = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+
 #[derive(Debug, Clone, Default)]
 pub struct EntryFilters {
     pub date: Option<NaiveDate>,
@@ -111,7 +113,7 @@ impl EntryFilters {
         })
     }
 
-    fn timestamp_bounds(&self) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> {
+    fn timestamp_bounds(&self) -> Result<TimestampBounds> {
         let mut start = self.date.map(start_of_day_utc);
         let mut end = self.date.map(next_day_start_utc).transpose()?;
 
