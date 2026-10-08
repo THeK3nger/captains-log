@@ -39,7 +39,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(EntryMetadata, String)> {
     let yaml_content = yaml_lines.join("\n");
 
     // Parse YAML
-    let metadata: EntryMetadata = serde_yaml::from_str(&yaml_content).context(
+    let metadata: EntryMetadata = serde_yaml_ng::from_str(&yaml_content).context(
         "Failed to parse frontmatter YAML. Check the format of journal and timestamp fields",
     )?;
 
@@ -65,8 +65,8 @@ pub fn format_entry_with_frontmatter(
         timestamp,
     };
 
-    let yaml =
-        serde_yaml::to_string(&metadata).context("Failed to serialize entry metadata to YAML")?;
+    let yaml = serde_yaml_ng::to_string(&metadata)
+        .context("Failed to serialize entry metadata to YAML")?;
 
     Ok(format!(
         "{}\n{}{}\n{}",
