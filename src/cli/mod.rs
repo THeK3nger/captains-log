@@ -518,14 +518,12 @@ fn handle_export_command(
         }
     }
 
-    // Print success message
+    // Only report success when writing to a file; stdout carries the payload
     if let Some(path) = &output_path {
         println!(
             "{}",
             format!("Entries exported successfully to {}", path).green()
         );
-    } else {
-        println!("{}", "Entries exported successfully to stdout".green());
     }
 
     Ok(())
