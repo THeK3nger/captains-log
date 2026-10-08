@@ -90,9 +90,7 @@ impl Default for Config {
 
         Config {
             database: DatabaseConfig { path: None },
-            editor: EditorConfig {
-                command: Some("vim".into()),
-            },
+            editor: EditorConfig { command: None },
             display: DisplayConfig {
                 colors_enabled: true,
                 date_format: "%Y-%m-%d %H:%M:%S".to_string(),
