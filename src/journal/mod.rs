@@ -1,8 +1,9 @@
 use std::fmt;
 
 use crate::database::Database;
+use crate::time::{days_in_month, next_day_start_utc, start_of_day_utc};
 use anyhow::{Context, Result};
-use chrono::{DateTime, Days, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
 use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
@@ -43,7 +44,7 @@ impl Entry {
             image_paths,
             journal: row
                 .get("journal")
-                .unwrap_or_else(|_| "Personal".to_string()),
+                .unwrap_or_else(|_| DEFAULT_JOURNAL.to_string()),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -74,6 +75,69 @@ impl Entry {
 
 type TimestampBounds = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
 
+const DEFAULT_JOURNAL: &str = "Personal";
+
+/// An entry to be inserted with [`Journal::create_entry`].
+///
+/// Only the content is required. The timestamp defaults to now and the
+/// journal to "Personal".
+#[derive(Debug, Clone, Copy)]
+pub struct NewEntry<'a> {
+    content: &'a str,
+    title: Option<&'a str>,
+    journal: Option<&'a str>,
+    timestamp: Option<DateTime<Utc>>,
+    audio_path: Option<&'a str>,
+}
+
+impl<'a> NewEntry<'a> {
+    pub fn new(content: &'a str) -> Self {
+        Self {
+            content,
+            title: None,
+            journal: None,
+            timestamp: None,
+            audio_path: None,
+        }
+    }
+
+    pub fn title(mut self, title: Option<&'a str>) -> Self {
+        self.title = title;
+        self
+    }
+
+    pub fn journal(mut self, journal: Option<&'a str>) -> Self {
+        self.journal = journal;
+        self
+    }
+
+    pub fn timestamp(mut self, timestamp: DateTime<Utc>) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
+
+    pub fn audio_path(mut self, audio_path: Option<&'a str>) -> Self {
+        self.audio_path = audio_path;
+        self
+    }
+}
+
+/// Sort direction for entries, always ordered by timestamp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    OldestFirst,
+    NewestFirst,
+}
+
+impl SortOrder {
+    fn as_sql(self) -> &'static str {
+        match self {
+            SortOrder::OldestFirst => "ASC",
+            SortOrder::NewestFirst => "DESC",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EntryFilters {
     pub date: Option<NaiveDate>,
@@ -91,20 +155,10 @@ impl EntryFilters {
     }
 
     pub fn for_month(year: i32, month: u32, journal: Option<&str>) -> Result<Self> {
-        let month_start = NaiveDate::from_ymd_opt(year, month, 1)
+        let last_day = days_in_month(year, month)
             .with_context(|| format!("Invalid year/month combination: {year}-{month:02}"))?;
-        let (next_year, next_month) = if month == 12 {
-            (year + 1, 1)
-        } else {
-            (year, month + 1)
-        };
-        let next_month_start =
-            NaiveDate::from_ymd_opt(next_year, next_month, 1).with_context(|| {
-                format!("Invalid year/month combination: {next_year}-{next_month:02}")
-            })?;
-        let month_end = next_month_start
-            .checked_sub_days(Days::new(1))
-            .context("Failed to calculate month end")?;
+        let month_start = NaiveDate::from_ymd_opt(year, month, 1).expect("validated above");
+        let month_end = NaiveDate::from_ymd_opt(year, month, last_day).expect("validated above");
 
         Ok(Self {
             since: Some(month_start),
@@ -145,38 +199,7 @@ impl EntryFilters {
     }
 }
 
-/// First instant of `date` in `tz` (system local if `None`), as UTC.
-/// If midnight doesn't exist (DST gap), the first valid hour of the day is used.
-fn start_of_day_utc(date: NaiveDate, tz: Option<Tz>) -> Result<DateTime<Utc>> {
-    for hour in 0..24 {
-        let naive = date
-            .and_hms_opt(hour, 0, 0)
-            .expect("hour is always in range");
-        let resolved = match tz {
-            Some(tz) => tz
-                .from_local_datetime(&naive)
-                .earliest()
-                .map(|dt| dt.to_utc()),
-            None => Local
-                .from_local_datetime(&naive)
-                .earliest()
-                .map(|dt| dt.to_utc()),
-        };
-        if let Some(utc) = resolved {
-            return Ok(utc);
-        }
-    }
-    anyhow::bail!("Could not resolve start of day for {date}")
-}
-
-fn next_day_start_utc(date: NaiveDate, tz: Option<Tz>) -> Result<DateTime<Utc>> {
-    let next_day = date
-        .checked_add_days(Days::new(1))
-        .context("Failed to calculate next day")?;
-    start_of_day_utc(next_day, tz)
-}
-
-fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+pub fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
     let mut chars = text.chars();
     let preview: String = chars.by_ref().take(max_chars).collect();
     if chars.next().is_some() {
@@ -216,60 +239,24 @@ impl Journal {
         self
     }
 
-    pub fn create_entry(
-        &self,
-        title: Option<&str>,
-        content: &str,
-        journal: Option<&str>,
-    ) -> Result<i64> {
+    /// Insert a new entry and return its id.
+    pub fn create_entry(&self, entry: NewEntry) -> Result<i64> {
         let conn = self.db.connection();
         let now = Utc::now();
-        let journal_name = journal.unwrap_or("Personal");
-
-        conn.execute(
-            "INSERT INTO entries (timestamp, title, content, journal, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![now, title, content, journal_name, now, now],
-        )?;
-
-        Ok(conn.last_insert_rowid())
-    }
-
-    pub fn create_entry_with_timestamp(
-        &self,
-        title: Option<&str>,
-        content: &str,
-        journal: Option<&str>,
-        timestamp: DateTime<Utc>,
-    ) -> Result<i64> {
-        let conn = self.db.connection();
-        let now = Utc::now();
-        let journal_name = journal.unwrap_or("Personal");
-
-        conn.execute(
-            "INSERT INTO entries (timestamp, title, content, journal, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![timestamp, title, content, journal_name, now, now],
-        )?;
-
-        Ok(conn.last_insert_rowid())
-    }
-
-    pub fn create_entry_with_audio(
-        &self,
-        title: Option<&str>,
-        content: &str,
-        journal: Option<&str>,
-        audio_path: Option<&str>,
-    ) -> Result<i64> {
-        let conn = self.db.connection();
-        let now = Utc::now();
-        let journal_name = journal.unwrap_or("Personal");
+        let timestamp = entry.timestamp.unwrap_or(now);
 
         conn.execute(
             "INSERT INTO entries (timestamp, title, content, journal, audio_path, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![now, title, content, journal_name, audio_path, now, now],
+            params![
+                timestamp,
+                entry.title,
+                entry.content,
+                entry.journal.unwrap_or(DEFAULT_JOURNAL),
+                entry.audio_path,
+                now,
+                now
+            ],
         )?;
 
         Ok(conn.last_insert_rowid())
@@ -285,15 +272,11 @@ impl Journal {
     }
 
     pub fn list_entries(&self) -> Result<Vec<Entry>> {
-        self.list_entries_with_order("timestamp", "DESC")
+        self.list_entries_with_order(SortOrder::NewestFirst)
     }
 
-    pub fn list_entries_with_order(
-        &self,
-        order_field: &str,
-        order_direction: &str,
-    ) -> Result<Vec<Entry>> {
-        let query = format!("{ENTRY_SELECT} ORDER BY {order_field} {order_direction}",);
+    pub fn list_entries_with_order(&self, order: SortOrder) -> Result<Vec<Entry>> {
+        let query = format!("{ENTRY_SELECT} ORDER BY timestamp {}", order.as_sql());
 
         self.collect_entries(&query, [])
     }
@@ -366,14 +349,13 @@ impl Journal {
     }
 
     pub fn list_entries_filtered(&self, filters: &EntryFilters) -> Result<Vec<Entry>> {
-        self.list_entries_filtered_with_order(filters, "timestamp", "DESC")
+        self.list_entries_filtered_with_order(filters, SortOrder::NewestFirst)
     }
 
     pub fn list_entries_filtered_with_order(
         &self,
         filters: &EntryFilters,
-        order_field: &str,
-        order_direction: &str,
+        order: SortOrder,
     ) -> Result<Vec<Entry>> {
         let (start, end) = filters.timestamp_bounds(self.timezone)?;
         let journal = filters.journal.as_deref();
@@ -395,7 +377,7 @@ impl Journal {
             query.push_str(&conditions.join(" AND "));
         }
 
-        query.push_str(&format!(" ORDER BY {order_field} {order_direction}"));
+        query.push_str(&format!(" ORDER BY timestamp {}", order.as_sql()));
 
         match (start.as_ref(), end.as_ref(), journal) {
             (Some(start), Some(end), Some(journal)) => {
@@ -424,7 +406,7 @@ impl Journal {
         journal: Option<&str>,
     ) -> Result<Vec<Entry>> {
         let filters = EntryFilters::for_month(year, month, journal)?;
-        self.list_entries_filtered_with_order(&filters, "timestamp", "ASC")
+        self.list_entries_filtered_with_order(&filters, SortOrder::OldestFirst)
     }
 
     fn collect_entries<P>(&self, query: &str, params: P) -> Result<Vec<Entry>>
@@ -497,13 +479,5 @@ mod tests {
             end.expect("end bound").to_rfc3339(),
             "2026-05-01T22:00:00+00:00"
         );
-    }
-
-    #[test]
-    fn missing_midnight_falls_back_to_first_valid_hour() {
-        // Havana skips 00:00-01:00 on the spring-forward day
-        let date = NaiveDate::from_ymd_opt(2026, 3, 8).expect("valid date");
-        let start = start_of_day_utc(date, Some(chrono_tz::America::Havana)).expect("resolves");
-        assert_eq!(start.to_rfc3339(), "2026-03-08T05:00:00+00:00");
     }
 }

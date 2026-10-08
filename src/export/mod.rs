@@ -1,7 +1,8 @@
 use crate::cli::dateparser::parse_entry_filters;
 use crate::journal::{Entry, Journal, SortOrder};
+use crate::time::{local_date, to_local};
 use anyhow::{Context, Result};
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
+use chrono::NaiveDate;
 use chrono_tz::Tz;
 use pulldown_cmark::{Event, Options, Tag, TagEnd};
 
@@ -18,26 +19,12 @@ pub struct ExportData {
 
 pub struct Exporter<'a> {
     journal: &'a Journal,
-    timezone: Option<String>,
+    timezone: Option<Tz>,
 }
 
 impl<'a> Exporter<'a> {
-    pub fn new(journal: &'a Journal, timezone: Option<String>) -> Self {
+    pub fn new(journal: &'a Journal, timezone: Option<Tz>) -> Self {
         Self { journal, timezone }
-    }
-
-    /// Convert a UTC timestamp to the configured (or system local) timezone.
-    fn to_local(&self, utc: &DateTime<Utc>) -> DateTime<FixedOffset> {
-        if let Some(tz_str) = &self.timezone
-            && let Ok(tz) = tz_str.parse::<Tz>()
-        {
-            return utc.with_timezone(&tz).fixed_offset();
-        }
-        utc.with_timezone(&Local).fixed_offset()
-    }
-
-    fn local_date(&self, utc: &DateTime<Utc>) -> NaiveDate {
-        self.to_local(utc).date_naive()
     }
 
     pub fn export_to_json(
@@ -77,7 +64,9 @@ impl<'a> Exporter<'a> {
             md_content.push_str(&format!("## {}\n\n", formatted_date));
 
             for entry in &entries {
-                let date_str = self.to_local(&entry.timestamp).format("%H:%M").to_string();
+                let date_str = to_local(&entry.timestamp, self.timezone)
+                    .format("%H:%M")
+                    .to_string();
                 if let Some(title) = &entry.title {
                     md_content.push_str(&format!("### {} - {}\n\n", date_str, title));
                 } else {
@@ -106,7 +95,11 @@ impl<'a> Exporter<'a> {
         for (date, entries) in grouped_entries {
             let created_date = entries
                 .first()
-                .map(|e| self.to_local(&e.timestamp).format("%Y%m%d").to_string())
+                .map(|e| {
+                    to_local(&e.timestamp, self.timezone)
+                        .format("%Y%m%d")
+                        .to_string()
+                })
                 .unwrap_or_default();
             let formatted_date = date.format("%A, %d/%m/%Y").to_string();
             org_content.push_str(&format!("* {}\n", formatted_date));
@@ -115,7 +108,9 @@ impl<'a> Exporter<'a> {
                 created_date
             ));
             for entry in entries {
-                let time = self.to_local(&entry.timestamp).format("%H:%M").to_string();
+                let time = to_local(&entry.timestamp, self.timezone)
+                    .format("%H:%M")
+                    .to_string();
                 if let Some(title) = &entry.title {
                     org_content.push_str(&format!("** {} {}\n", time, title));
                 } else {
@@ -140,7 +135,7 @@ impl<'a> Exporter<'a> {
                 filters.since.as_deref(),
                 filters.until.as_deref(),
                 filters.journal.as_deref(),
-                self.timezone.as_deref().and_then(|tz| tz.parse().ok()),
+                self.timezone,
             )?;
 
             self.journal
@@ -159,7 +154,7 @@ impl<'a> Exporter<'a> {
 
         let mut grouped_entries: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
         for entry in entries {
-            let date_key = self.local_date(&entry.timestamp);
+            let date_key = local_date(&entry.timestamp, self.timezone);
             grouped_entries.entry(date_key).or_default().push(entry);
         }
         grouped_entries

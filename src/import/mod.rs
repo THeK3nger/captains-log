@@ -1,6 +1,7 @@
-use crate::journal::Journal;
+use crate::journal::{Journal, NewEntry};
+use crate::time::localize;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -11,13 +12,10 @@ pub struct Importer<'a> {
 }
 
 impl<'a> Importer<'a> {
-    /// `timezone` is the IANA name used to interpret naive (org) timestamps;
-    /// `None` or an unknown name means the system local timezone.
-    pub fn new(journal: &'a Journal, timezone: Option<&str>) -> Self {
-        Self {
-            journal,
-            timezone: timezone.and_then(|tz| tz.parse().ok()),
-        }
+    /// `timezone` is used to interpret naive (org) timestamps; `None` means
+    /// the system local timezone.
+    pub fn new(journal: &'a Journal, timezone: Option<Tz>) -> Self {
+        Self { journal, timezone }
     }
 
     /// Import entries from an org-journal file
@@ -40,11 +38,11 @@ impl<'a> Importer<'a> {
         };
 
         for entry in entries {
-            match self.journal.create_entry_with_timestamp(
-                entry.title.as_deref(),
-                &entry.content,
-                journal_category,
-                entry.timestamp,
+            match self.journal.create_entry(
+                NewEntry::new(&entry.content)
+                    .title(entry.title.as_deref())
+                    .journal(journal_category)
+                    .timestamp(entry.timestamp),
             ) {
                 Ok(_) => stats.imported += 1,
                 Err(e) => {
@@ -80,11 +78,11 @@ impl<'a> Importer<'a> {
         };
 
         for entry in entries {
-            match self.journal.create_entry_with_timestamp(
-                entry.title.as_deref(),
-                &entry.content,
-                journal_category,
-                entry.timestamp,
+            match self.journal.create_entry(
+                NewEntry::new(&entry.content)
+                    .title(entry.title.as_deref())
+                    .journal(journal_category)
+                    .timestamp(entry.timestamp),
             ) {
                 Ok(_) => stats.imported += 1,
                 Err(e) => {
@@ -257,22 +255,6 @@ fn parse_timestamp(
         }
     }
     None
-}
-
-/// Interpret a naive local time in `timezone` (or the system timezone) as UTC.
-/// Ambiguous times (DST fall-back) resolve to the earlier instant; times that
-/// don't exist (DST gap) yield `None`.
-fn localize(naive: NaiveDateTime, timezone: Option<Tz>) -> Option<DateTime<Utc>> {
-    match timezone {
-        Some(tz) => tz
-            .from_local_datetime(&naive)
-            .earliest()
-            .map(|dt| dt.to_utc()),
-        None => Local
-            .from_local_datetime(&naive)
-            .earliest()
-            .map(|dt| dt.to_utc()),
-    }
 }
 
 /// Convert org-mode format to markdown

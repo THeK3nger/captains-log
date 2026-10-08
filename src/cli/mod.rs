@@ -8,12 +8,13 @@ use crate::cli::frontmatter::{format_entry_with_frontmatter, parse_frontmatter};
 use crate::cli::stardate::Stardate;
 use crate::config::Config;
 use crate::export::{ExportFilters, Exporter};
-use crate::import::Importer;
-use crate::journal::{Entry, Journal};
+use crate::import::{ImportStats, Importer};
+use crate::journal::{Entry, Journal, NewEntry, truncate_with_ellipsis};
+use crate::time::{days_in_month, to_local};
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use chrono_tz::Tz;
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use colored::*;
 use dateparser::{parse_entry_filters, parse_relative_date};
 use formatting::render_markdown;
@@ -126,9 +127,9 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<String>,
 
-        /// Export format (currently only json is supported)
-        #[arg(short, long, default_value = "json")]
-        format: String,
+        /// Export format
+        #[arg(short, long, value_enum, ignore_case = true, default_value_t = ExportFormat::Json)]
+        format: ExportFormat,
 
         /// Show entries from specific date (YYYY-MM-DD)
         #[arg(long)]
@@ -152,9 +153,9 @@ pub enum Commands {
         /// Path to file to import
         path: String,
 
-        /// Import format (supported formats: org, dayone)
-        #[arg(short, long, default_value = "org")]
-        format: String,
+        /// Import format
+        #[arg(short, long, value_enum, ignore_case = true, default_value_t = ImportFormat::Org)]
+        format: ImportFormat,
 
         /// Filter by specific date (YYYY-MM-DD) - only import entries from this date
         #[arg(long)]
@@ -192,6 +193,22 @@ pub enum Commands {
         #[arg(short, long, default_value_t = 4343)]
         port: u16,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ExportFormat {
+    Json,
+    #[value(alias = "md")]
+    Markdown,
+    Org,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ImportFormat {
+    /// org-journal files
+    Org,
+    /// DayOne JSON export
+    Dayone,
 }
 
 #[derive(Subcommand)]
@@ -293,7 +310,7 @@ pub fn handle_command(
                         format_entry_summary(
                             &entry,
                             config.display.stardate_mode,
-                            config.display.timezone.as_deref()
+                            config.get_timezone()
                         )
                     );
                 }
@@ -301,11 +318,7 @@ pub fn handle_command(
         }
         Commands::Show { id } => match journal.get_entry(id)? {
             Some(entry) => {
-                print_entry(
-                    &entry,
-                    config.display.stardate_mode,
-                    config.display.timezone.as_deref(),
-                );
+                print_entry(&entry, config.display.stardate_mode, config.get_timezone());
             }
             None => anyhow::bail!("Entry {} not found", id),
         },
@@ -330,7 +343,7 @@ pub fn handle_command(
                         format_entry_summary(
                             &entry,
                             config.display.stardate_mode,
-                            config.display.timezone.as_deref()
+                            config.get_timezone()
                         )
                     );
                 }
@@ -342,11 +355,7 @@ pub fn handle_command(
                     // Show the entry to be deleted
                     println!("{}", "Entry to be deleted:".yellow().bold());
                     println!();
-                    print_entry(
-                        &entry,
-                        config.display.stardate_mode,
-                        config.display.timezone.as_deref(),
-                    );
+                    print_entry(&entry, config.display.stardate_mode, config.get_timezone());
                     println!();
 
                     // Ask for confirmation
@@ -410,7 +419,8 @@ pub fn handle_command(
             } else {
                 // Content provided - create entry directly
                 let entry_content = content.join(" ");
-                let id = journal.create_entry(None, &entry_content, journal_category)?;
+                let id = journal
+                    .create_entry(NewEntry::new(&entry_content).journal(journal_category))?;
                 println!("{}", format!("Entry {} added successfully", id).green());
             }
         }
@@ -439,13 +449,7 @@ pub fn handle_command(
                 until,
                 export_journal.or_else(|| global_journal.map(str::to_string)),
             );
-            handle_export_command(
-                journal,
-                output,
-                &format,
-                filters,
-                config.display.timezone.clone(),
-            )?;
+            handle_export_command(journal, output, format, filters, config.get_timezone())?;
         }
         Commands::Import {
             path,
@@ -456,10 +460,10 @@ pub fn handle_command(
             handle_import_command(
                 journal,
                 &path,
-                &format,
+                format,
                 date,
                 import_journal.or_else(|| global_journal.map(str::to_string)),
-                config.display.timezone.as_deref(),
+                config.get_timezone(),
             )?;
         }
 
@@ -492,28 +496,16 @@ pub fn handle_command(
 fn handle_export_command(
     journal: &Journal,
     output_path: Option<String>,
-    format: &str,
+    format: ExportFormat,
     filters: Option<ExportFilters>,
-    timezone: Option<String>,
+    timezone: Option<Tz>,
 ) -> Result<()> {
     let exporter = Exporter::new(journal, timezone);
 
-    match format.to_lowercase().as_str() {
-        "json" => {
-            exporter.export_to_json(output_path.clone(), filters)?;
-        }
-        "md" | "markdown" => {
-            exporter.export_to_markdown(output_path.clone(), filters)?;
-        }
-        "org" => {
-            exporter.export_to_org(output_path.clone(), filters)?;
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unsupported export format '{}'. Currently supported formats: json, markdown, org",
-                format
-            ));
-        }
+    match format {
+        ExportFormat::Json => exporter.export_to_json(output_path.clone(), filters)?,
+        ExportFormat::Markdown => exporter.export_to_markdown(output_path.clone(), filters)?,
+        ExportFormat::Org => exporter.export_to_org(output_path.clone(), filters)?,
     }
 
     // Only report success when writing to a file; stdout carries the payload
@@ -548,92 +540,61 @@ fn create_export_filters(
 fn handle_import_command(
     journal: &Journal,
     file_path: &str,
-    format: &str,
+    format: ImportFormat,
     date: Option<String>,
     journal_category: Option<String>,
-    timezone: Option<&str>,
+    timezone: Option<Tz>,
 ) -> Result<()> {
     // Parse date filter if provided
     let filter_date = date
         .as_deref()
-        .map(|d| parse_relative_date(d, timezone.and_then(|tz| tz.parse().ok())))
+        .map(|d| parse_relative_date(d, timezone))
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid date filter: {}", e))?;
 
     let importer = Importer::new(journal, timezone);
 
-    match format.to_lowercase().as_str() {
-        "org" => {
-            println!(
-                "{} org-journal import is still very VERY experimental.",
-                "[EXPERIMENTAL]".yellow()
-            );
-            println!("{}", format!("Importing from {}...", file_path).cyan());
+    let notice = match format {
+        ImportFormat::Org => "org-journal import is still very VERY experimental.",
+        ImportFormat::Dayone => "DayOne JSON import is still experimental.",
+    };
+    println!("{} {}", "[EXPERIMENTAL]".yellow(), notice);
+    println!("{}", format!("Importing from {}...", file_path).cyan());
 
-            let stats =
-                importer.import_from_org(file_path, journal_category.as_deref(), filter_date)?;
-
-            // Display results
-            println!();
-            println!("{}", "Import completed!".green().bold());
-            println!("  Total entries found: {}", stats.total);
-            println!(
-                "  Successfully imported: {}",
-                stats.imported.to_string().green()
-            );
-
-            if stats.skipped > 0 {
-                println!("  Skipped: {}", stats.skipped.to_string().yellow());
-            }
-
-            if !stats.errors.is_empty() {
-                println!();
-                println!("{}", "Errors encountered:".red().bold());
-                for error in &stats.errors {
-                    println!("  - {}", error.red());
-                }
-            }
+    let stats = match format {
+        ImportFormat::Org => {
+            importer.import_from_org(file_path, journal_category.as_deref(), filter_date)?
         }
-        "dayone" => {
-            println!(
-                "{} DayOne JSON import is still experimental.",
-                "[EXPERIMENTAL]".yellow()
-            );
-            println!("{}", format!("Importing from {}...", file_path).cyan());
-
-            let stats =
-                importer.import_from_dayone(file_path, journal_category.as_deref(), filter_date)?;
-
-            // Display results
-            println!();
-            println!("{}", "Import completed!".green().bold());
-            println!("  Total entries found: {}", stats.total);
-            println!(
-                "  Successfully imported: {}",
-                stats.imported.to_string().green()
-            );
-
-            if stats.skipped > 0 {
-                println!("  Skipped: {}", stats.skipped.to_string().yellow());
-            }
-
-            if !stats.errors.is_empty() {
-                println!();
-                println!("{}", "Errors encountered:".red().bold());
-                for error in &stats.errors {
-                    println!("  - {}", error.red());
-                }
-            }
+        ImportFormat::Dayone => {
+            importer.import_from_dayone(file_path, journal_category.as_deref(), filter_date)?
         }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unsupported import format '{}'. Currently supported formats: org, dayone",
-                format
-            ));
-        }
-    }
+    };
+
+    print_import_stats(&stats);
 
     Ok(())
+}
+
+fn print_import_stats(stats: &ImportStats) {
+    println!();
+    println!("{}", "Import completed!".green().bold());
+    println!("  Total entries found: {}", stats.total);
+    println!(
+        "  Successfully imported: {}",
+        stats.imported.to_string().green()
+    );
+
+    if stats.skipped > 0 {
+        println!("  Skipped: {}", stats.skipped.to_string().yellow());
+    }
+
+    if !stats.errors.is_empty() {
+        println!();
+        println!("{}", "Errors encountered:".red().bold());
+        for error in &stats.errors {
+            println!("  - {}", error.red());
+        }
+    }
 }
 
 fn handle_record_command(
@@ -698,11 +659,10 @@ fn handle_record_command(
     // Store relative path: audio/filename.wav
     let relative_path = format!("audio/{}", filename);
 
-    let entry_id = journal_obj.create_entry_with_audio(
-        None, // No title
-        &transcription,
-        journal_category.as_deref(),
-        Some(&relative_path),
+    let entry_id = journal_obj.create_entry(
+        NewEntry::new(&transcription)
+            .journal(journal_category.as_deref())
+            .audio_path(Some(&relative_path)),
     )?;
 
     println!(
@@ -1009,7 +969,6 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
     Ok(())
 }
 
-/// Convert a UTC timestamp to the configured (or system local) timezone.
 /// Run the configured editor (which may include arguments, e.g. "code --wait") on `file`.
 fn run_editor(config: &Config, file: &Path) -> Result<ExitStatus> {
     let editor = config.get_editor_command();
@@ -1026,16 +985,7 @@ fn run_editor(config: &Config, file: &Path) -> Result<ExitStatus> {
         .with_context(|| format!("Failed to launch editor {editor:?}"))
 }
 
-fn to_local_dt(utc: &DateTime<Utc>, timezone: Option<&str>) -> DateTime<FixedOffset> {
-    if let Some(tz_str) = timezone
-        && let Ok(tz) = tz_str.parse::<Tz>()
-    {
-        return utc.with_timezone(&tz).fixed_offset();
-    }
-    utc.with_timezone(&Local).fixed_offset()
-}
-
-fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) {
+fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) {
     let width = get_wrap_width();
     println!("{}", "─".repeat(width as usize).bright_blue());
     println!(
@@ -1053,7 +1003,7 @@ fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) {
         println!(
             "{}: {}",
             "Date".cyan().bold(),
-            to_local_dt(&entry.timestamp, timezone)
+            to_local(&entry.timestamp, timezone)
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string()
                 .white()
@@ -1083,9 +1033,9 @@ fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) {
     println!("{}", "─".repeat(width as usize).bright_blue());
 }
 
-fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<&str>) -> String {
+fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) -> String {
     // Strip newlines and limit content preview to 40 chars.
-    let content_preview = truncate_preview(&entry.content.replace('\n', " "), 40);
+    let content_preview = truncate_with_ellipsis(&entry.content.replace('\n', " "), 40);
 
     let id = format!("[{}]", entry.id).bright_blue().bold();
 
@@ -1093,7 +1043,7 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<&st
         let stardate = entry.timestamp.to_stardate();
         format_stardate(stardate)
     } else {
-        to_local_dt(&entry.timestamp, timezone)
+        to_local(&entry.timestamp, timezone)
             .format("%Y-%m-%d %H:%M")
             .to_string()
             .white()
@@ -1145,16 +1095,6 @@ fn format_stardate(stardate: f64) -> String {
     };
 
     format!("{}{}", head.white(), tail.bright_black())
-}
-
-fn truncate_preview(text: &str, max_chars: usize) -> String {
-    let mut chars = text.chars();
-    let preview: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{}...", preview.trim_end())
-    } else {
-        preview
-    }
 }
 
 fn parse_entry_body(body: &str) -> (Option<String>, String) {
@@ -1210,7 +1150,11 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
     }
 
     // Create the entry
-    let id = journal.create_entry(title.as_deref(), &content, journal_category)?;
+    let id = journal.create_entry(
+        NewEntry::new(&content)
+            .title(title.as_deref())
+            .journal(journal_category),
+    )?;
     println!("{}", format!("Entry {} created successfully", id).green());
 
     // Clean up temp file
@@ -1280,7 +1224,7 @@ fn show_calendar(
     journal_filter: Option<&str>,
     config: &Config,
 ) -> Result<()> {
-    let now = to_local_dt(&Utc::now(), config.display.timezone.as_deref());
+    let now = to_local(&Utc::now(), config.get_timezone());
     let year = year.unwrap_or(now.year());
     let month = month.unwrap_or(now.month());
 
@@ -1293,10 +1237,10 @@ fn show_calendar(
     let entries = journal.list_entries_for_month_filtered(year, month, journal_filter)?;
 
     // Create a map of day -> entry count
-    let tz = config.display.timezone.as_deref();
+    let tz = config.get_timezone();
     let mut day_counts = std::collections::HashMap::new();
     for entry in &entries {
-        let day = to_local_dt(&entry.timestamp, tz).day();
+        let day = to_local(&entry.timestamp, tz).day();
         *day_counts.entry(day).or_insert(0) += 1;
     }
 
@@ -1329,15 +1273,7 @@ fn show_calendar(
     let first_day = NaiveDate::from_ymd_opt(year, month, 1).context("Invalid date")?;
     let first_weekday = first_day.weekday().num_days_from_monday();
 
-    let days_in_month = if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1)
-    }
-    .context("Invalid date")?
-    .pred_opt()
-    .context("Invalid date")?
-    .day();
+    let days_in_month = days_in_month(year, month).context("Invalid date")?;
 
     // Print calendar
     for _ in 0..first_weekday {

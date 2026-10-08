@@ -1,6 +1,7 @@
 use crate::journal::EntryFilters;
+use crate::time::{days_in_month, today};
 use anyhow::Result;
-use chrono::{Datelike, Duration, Local, NaiveDate, Utc};
+use chrono::{Datelike, Duration, NaiveDate};
 use chrono_tz::Tz;
 
 /// Parse relative date strings into NaiveDate
@@ -16,10 +17,7 @@ use chrono_tz::Tz;
 /// "Today" is the current date in `tz` (system local if `None`).
 pub fn parse_relative_date(input: &str, tz: Option<Tz>) -> Result<NaiveDate, String> {
     let input = input.trim().to_lowercase();
-    let today = match tz {
-        Some(tz) => Utc::now().with_timezone(&tz).date_naive(),
-        None => Local::now().date_naive(),
-    };
+    let today = today(tz);
 
     match input.as_str() {
         // Absolute dates
@@ -44,7 +42,9 @@ pub fn parse_relative_date(input: &str, tz: Option<Tz>) -> Result<NaiveDate, Str
                 year -= 1;
             }
 
-            let day = today.day().min(days_in_month(year, month as u32));
+            let day = today
+                .day()
+                .min(days_in_month(year, month as u32).ok_or("Invalid date")?);
             NaiveDate::from_ymd_opt(year, month as u32, day).ok_or("Invalid date".to_string())
         }
         "last year" => {
@@ -68,7 +68,9 @@ pub fn parse_relative_date(input: &str, tz: Option<Tz>) -> Result<NaiveDate, Str
                 year += 1;
             }
 
-            let day = today.day().min(days_in_month(year, month as u32));
+            let day = today
+                .day()
+                .min(days_in_month(year, month as u32).ok_or("Invalid date")?);
             NaiveDate::from_ymd_opt(year, month as u32, day).ok_or("Invalid date".to_string())
         }
         "next year" => {
@@ -155,17 +157,4 @@ fn parse_optional_date(
         .map(|v| parse_relative_date(v, tz))
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid {label}: {e}"))
-}
-
-/// Helper function to get days in a month
-fn days_in_month(year: i32, month: u32) -> u32 {
-    NaiveDate::from_ymd_opt(
-        if month == 12 { year + 1 } else { year },
-        if month == 12 { 1 } else { month + 1 },
-        1,
-    )
-    .unwrap()
-    .pred_opt()
-    .unwrap()
-    .day()
 }

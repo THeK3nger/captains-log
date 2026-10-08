@@ -6,13 +6,14 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::{Local, LocalResult, NaiveDateTime, TimeZone, Utc};
+use chrono::{NaiveDateTime, Utc};
 use pulldown_cmark::{Options, Parser as MdParser, html as md_html};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
 use crate::database::Database;
-use crate::journal::{Entry, Journal};
+use crate::journal::{Entry, Journal, NewEntry};
+use crate::time::{localize, to_local};
 
 #[derive(Deserialize)]
 struct EntryForm {
@@ -20,6 +21,17 @@ struct EntryForm {
     content: String,
     journal: String,
     timestamp: Option<String>,
+}
+
+impl EntryForm {
+    /// Title (`None` when blank) and journal (defaulting to "Personal"), both trimmed.
+    fn normalized_title_and_journal(&self) -> (Option<&str>, &str) {
+        let title = Some(self.title.trim()).filter(|title| !title.is_empty());
+        let journal = Some(self.journal.trim())
+            .filter(|journal| !journal.is_empty())
+            .unwrap_or("Personal");
+        (title, journal)
+    }
 }
 
 #[derive(Clone)]
@@ -119,21 +131,15 @@ async fn new_form_handler(State(state): State<AppState>) -> Html<String> {
 }
 
 async fn create_handler(State(state): State<AppState>, Form(data): Form<EntryForm>) -> Response {
-    let title = data.title.trim().to_string();
-    let title = if title.is_empty() {
-        None
-    } else {
-        Some(title.as_str())
-    };
-    let journal = if data.journal.trim().is_empty() {
-        "Personal"
-    } else {
-        data.journal.trim()
-    };
+    let (title, journal) = data.normalized_title_and_journal();
 
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
-        j.create_entry(title, data.content.trim(), Some(journal))
+        j.create_entry(
+            NewEntry::new(data.content.trim())
+                .title(title)
+                .journal(Some(journal)),
+        )
     };
 
     match result {
@@ -161,17 +167,7 @@ async fn update_handler(
     Path(id): Path<i64>,
     Form(data): Form<EntryForm>,
 ) -> Response {
-    let title = data.title.trim().to_string();
-    let title = if title.is_empty() {
-        None
-    } else {
-        Some(title.as_str())
-    };
-    let journal = if data.journal.trim().is_empty() {
-        "Personal"
-    } else {
-        data.journal.trim()
-    };
+    let (title, journal) = data.normalized_title_and_journal();
 
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
@@ -206,11 +202,7 @@ fn parse_local_form_timestamp(value: &str) -> Result<chrono::DateTime<Utc>> {
     let naive = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M"))?;
 
-    match Local.from_local_datetime(&naive) {
-        LocalResult::Single(dt) => Ok(dt.with_timezone(&Utc)),
-        LocalResult::Ambiguous(dt, _) => Ok(dt.with_timezone(&Utc)),
-        LocalResult::None => Err(anyhow::anyhow!("invalid local timestamp")),
-    }
+    localize(naive, None).ok_or_else(|| anyhow::anyhow!("invalid local timestamp"))
 }
 
 fn escape_html(s: &str) -> String {
@@ -245,7 +237,7 @@ fn render_entry_list(entries: &[Entry], active_id: Option<i64>) -> String {
                 ""
             };
             let active = if active_id == Some(e.id) { " active" } else { "" };
-            let local_ts = e.timestamp.with_timezone(&Local);
+            let local_ts = to_local(&e.timestamp, None);
             format!(
                 concat!(
                     r#"<div class="entry-item{active}""#,
@@ -285,9 +277,7 @@ fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
       <label class="form-label">DATE</label>
       <input class="form-input" type="datetime-local" name="timestamp" value="{}" step="1">
     </div>"#,
-                    e.timestamp
-                        .with_timezone(&Local)
-                        .format("%Y-%m-%dT%H:%M:%S")
+                    to_local(&e.timestamp, None).format("%Y-%m-%dT%H:%M:%S")
                 ),
                 escape_html(&e.content),
                 format!("/entry/{}", e.id),
@@ -349,7 +339,7 @@ fn render_entry_form(entry: Option<&Entry>, journals: &[String]) -> String {
 
 fn render_entry_detail(entry: &Entry) -> String {
     let title = entry.title.as_deref().unwrap_or("UNTITLED ENTRY");
-    let local_ts = entry.timestamp.with_timezone(&Local);
+    let local_ts = to_local(&entry.timestamp, None);
     let content_html = to_html(&entry.content);
     let audio_section = if let Some(ref path) = entry.audio_path {
         format!(r#"<div class="ed-audio">🎤 {}</div>"#, escape_html(path))

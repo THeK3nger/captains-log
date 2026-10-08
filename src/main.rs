@@ -11,6 +11,7 @@ mod export;
 mod import;
 mod journal;
 mod server;
+mod time;
 
 use cli::Commands;
 use config::Config;
