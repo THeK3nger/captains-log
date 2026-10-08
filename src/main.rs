@@ -51,9 +51,8 @@ fn main() -> Result<()> {
     let db = Database::new_with_path(&db_path)?;
     let journal = Journal::new(db);
 
-    if config.display.colors_enabled {
-        colored::control::set_override(true);
-    } else {
+    // Otherwise `colored` auto-detects: TTY, NO_COLOR, CLICOLOR, CLICOLOR_FORCE
+    if !config.display.colors_enabled {
         colored::control::set_override(false);
     }
 
