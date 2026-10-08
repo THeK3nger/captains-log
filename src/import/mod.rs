@@ -1,17 +1,23 @@
 use crate::journal::Journal;
 use anyhow::{Context, Result};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::fs;
 
 pub struct Importer<'a> {
     journal: &'a Journal,
+    timezone: Option<Tz>,
 }
 
 impl<'a> Importer<'a> {
-    pub fn new(journal: &'a Journal) -> Self {
-        Self { journal }
+    /// `timezone` is the IANA name used to interpret naive (org) timestamps;
+    /// `None` or an unknown name means the system local timezone.
+    pub fn new(journal: &'a Journal, timezone: Option<&str>) -> Self {
+        Self {
+            journal,
+            timezone: timezone.and_then(|tz| tz.parse().ok()),
+        }
     }
 
     /// Import entries from an org-journal file
@@ -24,7 +30,7 @@ impl<'a> Importer<'a> {
         let content =
             fs::read_to_string(file_path).context(format!("Failed to read file: {}", file_path))?;
 
-        let entries = parse_org_journal(&content, filter_date)?;
+        let entries = parse_org_journal(&content, filter_date, self.timezone)?;
 
         let mut stats = ImportStats {
             total: entries.len(),
@@ -105,13 +111,17 @@ pub struct ImportStats {
 
 #[derive(Debug, Clone)]
 struct ParsedEntry {
-    timestamp: NaiveDateTime,
+    timestamp: DateTime<Utc>,
     title: Option<String>,
     content: String,
 }
 
 /// Parse an org-journal file and extract entries
-fn parse_org_journal(content: &str, filter_date: Option<NaiveDate>) -> Result<Vec<ParsedEntry>> {
+fn parse_org_journal(
+    content: &str,
+    filter_date: Option<NaiveDate>,
+    timezone: Option<Tz>,
+) -> Result<Vec<ParsedEntry>> {
     let lines: Vec<&str> = content.lines().collect();
     let mut entries = Vec::new();
     let mut current_date: Option<NaiveDate> = None;
@@ -154,7 +164,7 @@ fn parse_org_journal(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
             let (time_str, title) = parse_entry_header(entry_header);
 
             // Parse timestamp
-            if let Some(timestamp) = parse_timestamp(date, time_str) {
+            if let Some(timestamp) = parse_timestamp(date, time_str, timezone) {
                 // Collect entry content until next entry or date header
                 i += 1;
                 let mut content_lines = Vec::new();
@@ -232,16 +242,37 @@ fn parse_entry_header(header: &str) -> (Option<&str>, Option<String>) {
 }
 
 /// Parse timestamp from date and time string
-fn parse_timestamp(date: NaiveDate, time_str: Option<&str>) -> Option<NaiveDateTime> {
+/// The naive time is interpreted in `timezone`, or the system timezone if `None`.
+fn parse_timestamp(
+    date: NaiveDate,
+    time_str: Option<&str>,
+    timezone: Option<Tz>,
+) -> Option<DateTime<Utc>> {
     if let Some(time) = time_str {
         let parts: Vec<&str> = time.split(':').collect();
         if parts.len() >= 2
             && let (Ok(hour), Ok(minute)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
         {
-            return date.and_hms_opt(hour, minute, 0);
+            return localize(date.and_hms_opt(hour, minute, 0)?, timezone);
         }
     }
     None
+}
+
+/// Interpret a naive local time in `timezone` (or the system timezone) as UTC.
+/// Ambiguous times (DST fall-back) resolve to the earlier instant; times that
+/// don't exist (DST gap) yield `None`.
+fn localize(naive: NaiveDateTime, timezone: Option<Tz>) -> Option<DateTime<Utc>> {
+    match timezone {
+        Some(tz) => tz
+            .from_local_datetime(&naive)
+            .earliest()
+            .map(|dt| dt.to_utc()),
+        None => Local
+            .from_local_datetime(&naive)
+            .earliest()
+            .map(|dt| dt.to_utc()),
+    }
 }
 
 /// Convert org-mode format to markdown
@@ -448,7 +479,7 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
                 "Failed to parse creation date: {}",
                 dayone_entry.creation_date
             ))?
-            .with_timezone(&chrono::Utc);
+            .with_timezone(&Utc);
 
         // Get timezone from either timeZone field or location.timeZoneName
         let tz_str = dayone_entry.time_zone.as_ref().or_else(|| {
@@ -458,25 +489,16 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
                 .and_then(|loc| loc.time_zone_name.as_ref())
         });
 
-        // Convert to local timezone if available, otherwise use UTC
-        let timestamp = if let Some(tz_string) = tz_str {
-            // Parse timezone (e.g., "Europe/Rome")
-            if let Ok(tz) = tz_string.parse::<Tz>() {
-                // Convert UTC time to the local timezone and get naive local time
-                let local_time = utc_time.with_timezone(&tz);
-                local_time.naive_local()
-            } else {
-                // If timezone parsing fails, fall back to UTC naive time
-                utc_time.naive_utc()
-            }
-        } else {
-            // If no timezone specified, use UTC naive time
-            utc_time.naive_utc()
+        // The entry's own timezone (if known) determines its calendar date
+        let entry_tz = tz_str.and_then(|tz| tz.parse::<Tz>().ok());
+        let local_date = match entry_tz {
+            Some(tz) => utc_time.with_timezone(&tz).date_naive(),
+            None => utc_time.date_naive(),
         };
 
         // Skip if filter_date is set and doesn't match
         if let Some(filter) = filter_date
-            && timestamp.date() != filter
+            && local_date != filter
         {
             continue;
         }
@@ -497,7 +519,7 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
         }
 
         entries.push(ParsedEntry {
-            timestamp,
+            timestamp: utc_time,
             title,
             content,
         });

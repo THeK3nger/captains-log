@@ -461,6 +461,7 @@ pub fn handle_command(
                 &format,
                 date,
                 import_journal.or_else(|| global_journal.map(str::to_string)),
+                config.display.timezone.as_deref(),
             )?;
         }
 
@@ -554,6 +555,7 @@ fn handle_import_command(
     format: &str,
     date: Option<String>,
     journal_category: Option<String>,
+    timezone: Option<&str>,
 ) -> Result<()> {
     // Parse date filter if provided
     let filter_date = date
@@ -562,7 +564,7 @@ fn handle_import_command(
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid date filter: {}", e))?;
 
-    let importer = Importer::new(journal);
+    let importer = Importer::new(journal, timezone);
 
     match format.to_lowercase().as_str() {
         "org" => {
