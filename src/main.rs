@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     }
 
     let db = Database::new_with_path(&db_path)?;
-    let journal = Journal::new(db);
+    let journal = Journal::new(db).with_timezone(config.get_timezone());
 
     // Otherwise `colored` auto-detects: TTY, NO_COLOR, CLICOLOR, CLICOLOR_FORCE
     if !config.display.colors_enabled {

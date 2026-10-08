@@ -140,6 +140,7 @@ impl<'a> Exporter<'a> {
                 filters.since.as_deref(),
                 filters.until.as_deref(),
                 filters.journal.as_deref(),
+                self.timezone.as_deref().and_then(|tz| tz.parse().ok()),
             )?;
 
             self.journal

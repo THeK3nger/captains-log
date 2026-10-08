@@ -236,6 +236,7 @@ pub fn handle_command(
                 since.as_deref(),
                 until.as_deref(),
                 journal_filter,
+                config.get_timezone(),
             )?;
 
             let mut entries = if filters.is_active() {
@@ -559,7 +560,7 @@ fn handle_import_command(
     // Parse date filter if provided
     let filter_date = date
         .as_deref()
-        .map(parse_relative_date)
+        .map(|d| parse_relative_date(d, timezone.and_then(|tz| tz.parse().ok())))
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid date filter: {}", e))?;
 
@@ -1283,7 +1284,7 @@ fn show_calendar(
     journal_filter: Option<&str>,
     config: &Config,
 ) -> Result<()> {
-    let now = Local::now();
+    let now = to_local_dt(&Utc::now(), config.display.timezone.as_deref());
     let year = year.unwrap_or(now.year());
     let month = month.unwrap_or(now.month());
 

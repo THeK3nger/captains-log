@@ -2,7 +2,8 @@ use std::fmt;
 
 use crate::database::Database;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Days, NaiveDate, Utc};
+use chrono::{DateTime, Days, Local, NaiveDate, TimeZone, Utc};
+use chrono_tz::Tz;
 use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -113,19 +114,27 @@ impl EntryFilters {
         })
     }
 
-    fn timestamp_bounds(&self) -> Result<TimestampBounds> {
-        let mut start = self.date.map(start_of_day_utc);
-        let mut end = self.date.map(next_day_start_utc).transpose()?;
+    /// UTC bounds of the filter. Days are calendar days in `tz` (system local if `None`).
+    fn timestamp_bounds(&self, tz: Option<Tz>) -> Result<TimestampBounds> {
+        let mut start = self
+            .date
+            .map(|date| start_of_day_utc(date, tz))
+            .transpose()?;
+        let mut end = self
+            .date
+            .map(|date| next_day_start_utc(date, tz))
+            .transpose()?;
 
         if let Some(since) = self.since {
+            let since_start = start_of_day_utc(since, tz)?;
             start = Some(match start {
-                Some(current) => current.max(start_of_day_utc(since)),
-                None => start_of_day_utc(since),
+                Some(current) => current.max(since_start),
+                None => since_start,
             });
         }
 
         if let Some(until) = self.until {
-            let until_end = next_day_start_utc(until)?;
+            let until_end = next_day_start_utc(until, tz)?;
             end = Some(match end {
                 Some(current) => current.min(until_end),
                 None => until_end,
@@ -136,19 +145,35 @@ impl EntryFilters {
     }
 }
 
-fn start_of_day_utc(date: NaiveDate) -> DateTime<Utc> {
-    DateTime::from_naive_utc_and_offset(
-        date.and_hms_opt(0, 0, 0)
-            .expect("midnight should always be valid"),
-        Utc,
-    )
+/// First instant of `date` in `tz` (system local if `None`), as UTC.
+/// If midnight doesn't exist (DST gap), the first valid hour of the day is used.
+fn start_of_day_utc(date: NaiveDate, tz: Option<Tz>) -> Result<DateTime<Utc>> {
+    for hour in 0..24 {
+        let naive = date
+            .and_hms_opt(hour, 0, 0)
+            .expect("hour is always in range");
+        let resolved = match tz {
+            Some(tz) => tz
+                .from_local_datetime(&naive)
+                .earliest()
+                .map(|dt| dt.to_utc()),
+            None => Local
+                .from_local_datetime(&naive)
+                .earliest()
+                .map(|dt| dt.to_utc()),
+        };
+        if let Some(utc) = resolved {
+            return Ok(utc);
+        }
+    }
+    anyhow::bail!("Could not resolve start of day for {date}")
 }
 
-fn next_day_start_utc(date: NaiveDate) -> Result<DateTime<Utc>> {
+fn next_day_start_utc(date: NaiveDate, tz: Option<Tz>) -> Result<DateTime<Utc>> {
     let next_day = date
         .checked_add_days(Days::new(1))
         .context("Failed to calculate next day")?;
-    Ok(start_of_day_utc(next_day))
+    start_of_day_utc(next_day, tz)
 }
 
 fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
@@ -177,11 +202,18 @@ impl fmt::Display for Entry {
 
 pub struct Journal {
     db: Database,
+    timezone: Option<Tz>,
 }
 
 impl Journal {
     pub fn new(db: Database) -> Self {
-        Journal { db }
+        Journal { db, timezone: None }
+    }
+
+    /// Timezone used to interpret calendar days in date filters (system local if `None`).
+    pub fn with_timezone(mut self, timezone: Option<Tz>) -> Self {
+        self.timezone = timezone;
+        self
     }
 
     pub fn create_entry(
@@ -343,7 +375,7 @@ impl Journal {
         order_field: &str,
         order_direction: &str,
     ) -> Result<Vec<Entry>> {
-        let (start, end) = filters.timestamp_bounds()?;
+        let (start, end) = filters.timestamp_bounds(self.timezone)?;
         let journal = filters.journal.as_deref();
         let mut query = ENTRY_SELECT.to_string();
         let mut conditions = Vec::new();
@@ -432,7 +464,9 @@ mod tests {
             date: NaiveDate::from_ymd_opt(2026, 5, 1),
             ..EntryFilters::default()
         };
-        let (start, end) = filters.timestamp_bounds().expect("bounds should resolve");
+        let (start, end) = filters
+            .timestamp_bounds(Some(chrono_tz::UTC))
+            .expect("bounds should resolve");
 
         assert_eq!(
             start.expect("start bound").date_naive(),
@@ -442,5 +476,34 @@ mod tests {
             end.expect("end bound").date_naive(),
             NaiveDate::from_ymd_opt(2026, 5, 2).expect("valid date")
         );
+    }
+
+    #[test]
+    fn day_bounds_follow_the_timezone() {
+        let filters = EntryFilters {
+            date: NaiveDate::from_ymd_opt(2026, 5, 1),
+            ..EntryFilters::default()
+        };
+        let (start, end) = filters
+            .timestamp_bounds(Some(chrono_tz::Europe::Rome))
+            .expect("bounds should resolve");
+
+        // Rome is UTC+2 in May: local midnight is 22:00 UTC the previous day
+        assert_eq!(
+            start.expect("start bound").to_rfc3339(),
+            "2026-04-30T22:00:00+00:00"
+        );
+        assert_eq!(
+            end.expect("end bound").to_rfc3339(),
+            "2026-05-01T22:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn missing_midnight_falls_back_to_first_valid_hour() {
+        // Havana skips 00:00-01:00 on the spring-forward day
+        let date = NaiveDate::from_ymd_opt(2026, 3, 8).expect("valid date");
+        let start = start_of_day_utc(date, Some(chrono_tz::America::Havana)).expect("resolves");
+        assert_eq!(start.to_rfc3339(), "2026-03-08T05:00:00+00:00");
     }
 }

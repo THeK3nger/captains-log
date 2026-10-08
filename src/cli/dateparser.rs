@@ -1,6 +1,7 @@
 use crate::journal::EntryFilters;
 use anyhow::Result;
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use chrono::{Datelike, Duration, Local, NaiveDate, Utc};
+use chrono_tz::Tz;
 
 /// Parse relative date strings into NaiveDate
 ///
@@ -11,9 +12,14 @@ use chrono::{Datelike, Duration, Local, NaiveDate};
 /// - "X days ago", "X days from now"
 /// - "X weeks ago", "X weeks from now"
 /// - "this week" -> It is interpreted as the nearest Monday (start of the week)
-pub fn parse_relative_date(input: &str) -> Result<NaiveDate, String> {
+///
+/// "Today" is the current date in `tz` (system local if `None`).
+pub fn parse_relative_date(input: &str, tz: Option<Tz>) -> Result<NaiveDate, String> {
     let input = input.trim().to_lowercase();
-    let today = Local::now().date_naive();
+    let today = match tz {
+        Some(tz) => Utc::now().with_timezone(&tz).date_naive(),
+        None => Local::now().date_naive(),
+    };
 
     match input.as_str() {
         // Absolute dates
@@ -130,18 +136,23 @@ pub fn parse_entry_filters(
     since: Option<&str>,
     until: Option<&str>,
     journal: Option<&str>,
+    tz: Option<Tz>,
 ) -> Result<EntryFilters> {
     Ok(EntryFilters {
-        date: parse_optional_date(date, "date")?,
-        since: parse_optional_date(since, "since date")?,
-        until: parse_optional_date(until, "until date")?,
+        date: parse_optional_date(date, "date", tz)?,
+        since: parse_optional_date(since, "since date", tz)?,
+        until: parse_optional_date(until, "until date", tz)?,
         journal: journal.map(str::to_string),
     })
 }
 
-fn parse_optional_date(value: Option<&str>, label: &str) -> Result<Option<NaiveDate>> {
+fn parse_optional_date(
+    value: Option<&str>,
+    label: &str,
+    tz: Option<Tz>,
+) -> Result<Option<NaiveDate>> {
     value
-        .map(parse_relative_date)
+        .map(|v| parse_relative_date(v, tz))
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid {label}: {e}"))
 }

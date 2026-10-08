@@ -156,6 +156,14 @@ impl Config {
         }
     }
 
+    /// Configured display timezone, or `None` for the system local timezone.
+    pub fn get_timezone(&self) -> Option<chrono_tz::Tz> {
+        self.display
+            .timezone
+            .as_deref()
+            .and_then(|tz| tz.parse().ok())
+    }
+
     pub fn get_editor_command(&self) -> String {
         self.editor
             .command
