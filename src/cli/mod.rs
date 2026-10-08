@@ -35,6 +35,14 @@ pub enum Commands {
     Delete {
         /// Entry ID to delete
         id: i64,
+
+        /// Don't ask for confirmation (also deletes the attached audio file)
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Keep the attached audio file instead of deleting it
+        #[arg(long)]
+        keep_audio: bool,
     },
 
     /// Move an entry to a different journal
@@ -128,7 +136,11 @@ pub fn handle_command(
         Commands::List(args) => list_entries(journal, config, args, global_journal),
         Commands::Show { id } => show_entry(journal, config, id),
         Commands::Search { query } => search_entries(journal, config, &query),
-        Commands::Delete { id } => delete_entry(journal, config, id),
+        Commands::Delete {
+            id,
+            yes,
+            keep_audio,
+        } => delete_entry(journal, config, db_path, id, yes, keep_audio),
         Commands::Move {
             id,
             journal: target_journal,

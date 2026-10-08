@@ -1,4 +1,5 @@
 use super::list::print_entry;
+use crate::audio::{get_audio_directory, get_audio_full_path};
 use crate::cli::frontmatter::{format_entry_with_frontmatter, parse_frontmatter};
 use crate::config::Config;
 use crate::journal::{Journal, NewEntry};
@@ -6,7 +7,7 @@ use anyhow::{Context, Result};
 use colored::*;
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 /// `cl new`: create an entry from inline content, or open the editor if there is none.
@@ -26,38 +27,109 @@ pub fn create_entry(
     Ok(())
 }
 
-pub fn delete_entry(journal: &Journal, config: &Config, id: i64) -> Result<()> {
-    let Some(entry) = journal.get_entry(id)? else {
-        anyhow::bail!("Entry {} not found", id);
-    };
-
-    // Show the entry to be deleted
-    println!("{}", "Entry to be deleted:".yellow().bold());
-    println!();
-    print_entry(&entry, config.display.stardate_mode, config.get_timezone());
-    println!();
-
-    // Ask for confirmation
-    print!(
-        "{}",
-        "Are you sure you want to delete this entry? (y/N): "
-            .red()
-            .bold()
-    );
+/// Print `prompt` and read a y/N answer from stdin. EOF or anything but y/yes is "no".
+fn confirm(prompt: ColoredString) -> Result<bool> {
+    print!("{prompt}");
     std::io::Write::flush(&mut std::io::stdout())?;
 
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
     let input = input.trim().to_lowercase();
+    Ok(input == "y" || input == "yes")
+}
 
-    if input == "y" || input == "yes" {
-        if journal.delete_entry(id)? {
-            println!("{}", format!("Entry {} deleted", id).green());
-        } else {
-            println!("{}", format!("Failed to delete entry {}", id).red());
+/// Resolve an entry's audio file, refusing anything outside the audio directory
+/// (the path comes from the database, so don't trust it blindly).
+fn audio_file_to_remove(db_path: &Path, relative_path: &str) -> Result<Option<PathBuf>> {
+    let full_path = get_audio_full_path(db_path, relative_path)?;
+    if !full_path.exists() {
+        return Ok(None);
+    }
+
+    let audio_dir = get_audio_directory(db_path)?.canonicalize()?;
+    let full_path = full_path.canonicalize()?;
+    if !full_path.starts_with(&audio_dir) {
+        anyhow::bail!(
+            "Refusing to delete {}: it is outside the audio directory",
+            full_path.display()
+        );
+    }
+    Ok(Some(full_path))
+}
+
+/// `cl delete`. Asks for confirmation unless `yes` is set. If the entry has an
+/// audio recording, also removes the file (asking first, unless `yes`), unless
+/// `keep_audio` is set.
+pub fn delete_entry(
+    journal: &Journal,
+    config: &Config,
+    db_path: &Path,
+    id: i64,
+    yes: bool,
+    keep_audio: bool,
+) -> Result<()> {
+    let Some(entry) = journal.get_entry(id)? else {
+        anyhow::bail!("Entry {} not found", id);
+    };
+
+    if !yes {
+        // Show the entry to be deleted
+        println!("{}", "Entry to be deleted:".yellow().bold());
+        println!();
+        print_entry(&entry, config.display.stardate_mode, config.get_timezone());
+        println!();
+
+        let prompt = "Are you sure you want to delete this entry? (y/N): "
+            .red()
+            .bold();
+        if !confirm(prompt)? {
+            println!("{}", "Deletion cancelled".yellow());
+            return Ok(());
         }
-    } else {
-        println!("{}", "Deletion cancelled".yellow());
+    }
+
+    // Decide about the audio file before deleting the entry, so a "no" or a
+    // problem with the path doesn't leave a half-finished delete behind.
+    let mut audio_to_remove = None;
+    let mut audio_note = None;
+    if let Some(relative_path) = entry.audio_path.as_deref() {
+        if keep_audio {
+            audio_note = Some(format!("Audio file kept: {relative_path}"));
+        } else {
+            match audio_file_to_remove(db_path, relative_path)? {
+                None => {
+                    audio_note = Some(format!(
+                        "Audio file not found, nothing to remove: {relative_path}"
+                    ));
+                }
+                Some(path) => {
+                    let prompt = format!("Also delete the audio file {relative_path}? (y/N): ");
+                    if yes || confirm(prompt.red().bold())? {
+                        audio_to_remove = Some(path);
+                    } else {
+                        audio_note = Some(format!("Audio file kept: {relative_path}"));
+                    }
+                }
+            }
+        }
+    }
+
+    if !journal.delete_entry(id)? {
+        println!("{}", format!("Failed to delete entry {}", id).red());
+        return Ok(());
+    }
+    println!("{}", format!("Entry {} deleted", id).green());
+
+    if let Some(path) = audio_to_remove {
+        fs::remove_file(&path).with_context(|| {
+            format!(
+                "Entry {id} was deleted, but the audio file {} could not be removed",
+                path.display()
+            )
+        })?;
+        println!("{}", "Audio file deleted".green());
+    } else if let Some(note) = audio_note {
+        println!("{}", note.bright_black());
     }
 
     Ok(())
