@@ -19,7 +19,8 @@ use dateparser::{parse_entry_filters, parse_relative_date};
 use formatting::render_markdown;
 use std::env;
 use std::fs;
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, ExitStatus};
 
 const DEFAULT_LIST_LIMIT: usize = 20;
 
@@ -1012,6 +1013,22 @@ fn handle_config_command(action: Option<ConfigAction>, config: &Config) -> Resul
 }
 
 /// Convert a UTC timestamp to the configured (or system local) timezone.
+/// Run the configured editor (which may include arguments, e.g. "code --wait") on `file`.
+fn run_editor(config: &Config, file: &Path) -> Result<ExitStatus> {
+    let editor = config.get_editor_command();
+    let mut parts = shlex::split(&editor)
+        .filter(|parts| !parts.is_empty())
+        .with_context(|| format!("Invalid editor command: {editor:?}"))?
+        .into_iter();
+    let program = parts.next().expect("checked non-empty");
+
+    Command::new(&program)
+        .args(parts)
+        .arg(file)
+        .status()
+        .with_context(|| format!("Failed to launch editor {editor:?}"))
+}
+
 fn to_local_dt(utc: &DateTime<Utc>, timezone: Option<&str>) -> DateTime<FixedOffset> {
     if let Some(tz_str) = timezone
         && let Ok(tz) = tz_str.parse::<Tz>()
@@ -1174,14 +1191,7 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
     let template_content = "# \n\n";
     fs::write(&temp_file, template_content)?;
 
-    // Get editor from config
-    let editor = config.get_editor_command();
-
-    // Open editor
-    let status = Command::new(&editor)
-        .arg(&temp_file)
-        .status()
-        .context("Failed to launch editor")?;
+    let status = run_editor(config, &temp_file)?;
 
     if !status.success() {
         return Err(anyhow::anyhow!("Editor exited with error"));
@@ -1232,14 +1242,7 @@ fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
         format_entry_with_frontmatter(&entry.journal, entry.timestamp, &body_content)?;
     fs::write(&temp_file, content_with_frontmatter)?;
 
-    // Get editor from config
-    let editor = config.get_editor_command();
-
-    // Open editor
-    let status = Command::new(&editor)
-        .arg(&temp_file)
-        .status()
-        .context("Failed to launch editor")?;
+    let status = run_editor(config, &temp_file)?;
 
     if !status.success() {
         return Err(anyhow::anyhow!("Editor exited with error"));
