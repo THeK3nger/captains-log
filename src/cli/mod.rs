@@ -307,7 +307,7 @@ pub fn handle_command(
                     config.display.timezone.as_deref(),
                 );
             }
-            None => println!("{}", format!("Entry {} not found", id).red()),
+            None => anyhow::bail!("Entry {} not found", id),
         },
         Commands::Search { query } => {
             let entries = journal.search_entries(&query)?;
@@ -372,9 +372,7 @@ pub fn handle_command(
                         println!("{}", "Deletion cancelled".yellow());
                     }
                 }
-                None => {
-                    println!("{}", format!("Entry {} not found", id).red());
-                }
+                None => anyhow::bail!("Entry {} not found", id),
             }
         }
         Commands::Move {
@@ -396,9 +394,7 @@ pub fn handle_command(
                     println!("{}", format!("Failed to move entry {}", id).red());
                 }
             }
-            None => {
-                println!("{}", format!("Entry {} not found", id).red());
-            }
+            None => anyhow::bail!("Entry {} not found", id),
         },
         Commands::Edit { id } => {
             edit_entry(journal, id, config)?;
