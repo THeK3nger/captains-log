@@ -1,5 +1,5 @@
 use crate::cli::dateparser::parse_entry_filters;
-use crate::journal::{Entry, Journal};
+use crate::journal::{Entry, Journal, SortOrder};
 use anyhow::{Context, Result};
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
 use chrono_tz::Tz;
@@ -144,9 +144,9 @@ impl<'a> Exporter<'a> {
             )?;
 
             self.journal
-                .list_entries_filtered_with_order(&parsed_filters, "timestamp", "ASC")
+                .list_entries_filtered_with_order(&parsed_filters, SortOrder::OldestFirst)
         } else {
-            self.journal.list_entries_with_order("timestamp", "ASC")
+            self.journal.list_entries_with_order(SortOrder::OldestFirst)
         }
     }
 
