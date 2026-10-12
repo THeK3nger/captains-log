@@ -38,9 +38,9 @@ pub struct ListArgs {
     #[arg(long, conflicts_with = "limit")]
     pub all: bool,
 
-    /// Show newest entries first
+    /// Show oldest entries first (default: newest first)
     #[arg(long)]
-    pub newest_first: bool,
+    pub oldest_first: bool,
 }
 
 pub fn list_entries(
@@ -56,7 +56,7 @@ pub fn list_entries(
         journal: list_journal,
         limit,
         all,
-        newest_first,
+        oldest_first,
     } = args;
 
     if limit == Some(0) {
@@ -98,15 +98,15 @@ pub fn list_entries(
         entries.truncate(limit);
     }
 
-    if !newest_first {
+    if oldest_first {
         entries.reverse();
     }
 
     let shown_entries = entries.len();
-    let order_label = if newest_first {
-        "newest first"
-    } else {
+    let order_label = if oldest_first {
         "oldest to newest"
+    } else {
+        "newest first"
     };
 
     println!(
