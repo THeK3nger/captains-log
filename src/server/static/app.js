@@ -1,15 +1,25 @@
-// Keep the detail pane in sync with browser back/forward navigation.
-window.addEventListener('popstate', function () {
-  var m = location.pathname.match(/^\/entry\/(\d+)$/);
-  var detail = document.getElementById('entry-detail');
-  document.querySelectorAll('.entry-item').forEach(function (n) { n.classList.remove('active'); });
-  if (m) {
-    var el = document.querySelector('[hx-get="/entry/' + m[1] + '"]');
-    if (el) el.classList.add('active');
-    fetch('/entry/' + m[1], { headers: { 'HX-Request': 'true' } })
-      .then(function (r) { return r.text(); })
-      .then(function (html) { detail.innerHTML = html; });
-  } else {
-    detail.innerHTML = document.getElementById('placeholder-tpl').innerHTML;
+// HTMX owns browser history. Derive selection from the content that actually
+// arrived, so failed or superseded requests never highlight the wrong entry.
+(function () {
+  if (window.captainsLogInitialized) return;
+  window.captainsLogInitialized = true;
+
+  function syncSelection() {
+    var current = document.querySelector('#entry-detail [data-entry-id]');
+    var id = current && current.dataset.entryId;
+    document.querySelectorAll('.entry-item').forEach(function (item) {
+      var active = item.dataset.entryId === id;
+      item.classList.toggle('active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
   }
-});
+
+  document.addEventListener('htmx:afterSwap', function (event) {
+    if (event.detail.target.id !== 'entry-detail') return;
+    event.detail.target.scrollTop = 0;
+    syncSelection();
+  });
+  document.addEventListener('htmx:historyRestore', syncSelection);
+  syncSelection();
+})();
