@@ -90,13 +90,26 @@ html, body {
 .tb-title {
   flex: 1;
   min-width: 0;
-  background: var(--frame-top);
+  background: var(--bg);
   display: flex;
   align-items: flex-end;
-  padding: 0 24px 10px;
-  font-size: 26px;
-  letter-spacing: 5px;
+  gap: 20px;
+  padding: 0 16px 0 0;
+  color: var(--orange);
   white-space: nowrap;
+}
+.tb-title::before {
+  content: "";
+  flex: 1;
+  align-self: stretch;
+  background: var(--frame-top);
+}
+.tb-name {
+  flex-shrink: 0;
+  margin-bottom: 10px;
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: 5px;
 }
 
 .tb-seg, .bb-seg { width: 90px; flex-shrink: 0; background: var(--purple); }
@@ -185,12 +198,31 @@ html, body {
   padding-left: calc(var(--curve) + 8px);
 }
 
-.entry-list {
+.entry-browser {
   width: clamp(230px, 27vw, 320px);
   flex-shrink: 0;
-  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid #1a1a1a;
 }
+.entry-list { flex: 1; min-height: 0; overflow-y: auto; }
+.list-search { padding: 12px 16px; border-bottom: 5px solid var(--blue); }
+.search-controls { display: flex; gap: var(--gap); }
+.search-controls .form-input { min-width: 0; padding: 8px 10px; font-size: 14px; }
+.search-submit {
+  flex-shrink: 0;
+  border: 0;
+  padding: 0 10px;
+  background: var(--purple);
+  color: #000;
+  font: 700 12px 'Antonio', 'Arial Narrow', Arial, sans-serif;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.search-submit:hover { background: var(--salmon); }
+.search-clear { display: inline-block; margin-top: 8px; font-size: 12px; color: var(--periwinkle); }
+.mobile-back { display: none; }
 
 .entry-detail {
   flex: 1;
@@ -214,6 +246,8 @@ html, body {
   background: var(--frame-bottom);
   display: flex;
   align-items: center;
+  gap: 16px;
+  justify-content: space-between;
   padding: 0 24px;
 }
 
@@ -226,6 +260,7 @@ html, body {
   letter-spacing: 1px;
 }
 .bb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.keyboard-help { flex-shrink: 0; font-size: 11px; letter-spacing: 1px; }
 
 .bb-cap { background: var(--orange); width: 40px; }
 
@@ -300,10 +335,13 @@ html, body {
 
 /* Entry detail */
 .ed-header {
-  border-bottom: 2px solid var(--orange);
-  padding-bottom: 16px;
   margin-bottom: 22px;
 }
+.lcars-divider { display: flex; gap: var(--gap); height: 8px; margin-top: 16px; }
+.lcars-divider span:nth-child(1) { flex: 4; background: var(--blue); }
+.lcars-divider span:nth-child(2) { flex: 1; background: var(--salmon); }
+.lcars-divider span:nth-child(3) { flex: 2; background: var(--orange); }
+.ed-title:focus { outline: none; }
 
 .ed-title {
   font-size: 26px;
@@ -468,8 +506,6 @@ html, body {
 .entry-form { padding: 0; }
 
 .form-title-bar {
-  border-bottom: 2px solid var(--orange);
-  padding-bottom: 14px;
   margin-bottom: 22px;
 }
 
@@ -569,7 +605,8 @@ html, body {
     background: var(--frame-bottom);
     margin: calc(-1 * var(--gap)) 0;
   }
-  .tb-title { font-size: 22px; letter-spacing: 3px; padding: 0 12px 10px; }
+  .tb-title { gap: 10px; padding-right: 8px; }
+  .tb-name { font-size: 26px; letter-spacing: 2px; }
   .tb-seg { display: none; }
   .tb-cap { width: 24px; }
   .sidebar {
@@ -583,14 +620,30 @@ html, body {
   .sb-links { display: contents; }
   .sb-btn { height: 36px; max-width: 180px; }
   .main { flex-direction: column; }
-  .entry-list {
+  .entry-browser {
     width: 100%;
-    flex: 0 1 34%;
-    min-height: 84px;
+    flex: 1;
+    min-height: 0;
     border-right: 0;
-    border-bottom: 2px solid var(--blue);
   }
-  .entry-detail { padding: 16px 12px; }
+  .entry-detail { display: none; padding: 16px 12px; }
+  .search-controls .form-input { font-size: 16px; }
+  .lcars:has([data-detail-view]) .entry-browser,
+  .lcars:has([data-detail-view]) .sidebar { display: none; }
+  .lcars:has([data-detail-view]) .entry-detail { display: block; }
+  .mobile-back {
+    display: inline-block;
+    margin-bottom: 20px;
+    padding: 8px 12px;
+    background: var(--purple);
+    color: #000;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-decoration: none;
+  }
+  .mobile-back:hover { background: var(--salmon); }
+  .keyboard-help { display: none; }
   .entry-item { padding: 10px 12px; }
   .bb-text { padding: 0 12px; font-size: 11px; letter-spacing: 1px; }
   .bb-seg { width: 52px; }

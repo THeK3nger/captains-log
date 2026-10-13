@@ -35,32 +35,48 @@ impl EntryForm {
     }
 }
 
-/// `?journal=` on page URLs: restricts the sidebar list to one journal.
+/// Journal and literal title/content search filters for page URLs.
 #[derive(Deserialize, Default)]
 struct ListQuery {
     journal: Option<String>,
+    q: Option<String>,
 }
 
 impl ListQuery {
     fn journal(&self) -> Option<&str> {
         self.journal.as_deref().filter(|j| !j.is_empty())
     }
+
+    fn search(&self) -> Option<&str> {
+        self.q.as_deref().map(str::trim).filter(|q| !q.is_empty())
+    }
+
+    fn url_query(&self) -> String {
+        templates::list_query(self.journal(), self.search())
+    }
+}
+
+fn matches_search(title: Option<&str>, content: &str, search: &str) -> bool {
+    let search = search.to_lowercase();
+    title.is_some_and(|title| title.to_lowercase().contains(&search))
+        || content.to_lowercase().contains(&search)
 }
 
 /// Everything the page chrome needs: the (filtered) entry list and all journal names.
-fn sidebar_data(state: &AppState, journal: Option<&str>) -> (Vec<Entry>, Vec<String>) {
+fn sidebar_data(state: &AppState, query: &ListQuery) -> (Vec<Entry>, Vec<String>) {
     let j = state.journal.lock().expect("journal lock poisoned");
-    let entries = match journal {
+    let entries = match query.journal() {
         Some(name) => j.list_entries_filtered(&EntryFilters {
             journal: Some(name.to_string()),
             ..EntryFilters::default()
         }),
         None => j.list_entries(),
     };
-    (
-        entries.unwrap_or_default(),
-        j.list_journals().unwrap_or_default(),
-    )
+    let mut entries = entries.unwrap_or_default();
+    if let Some(search) = query.search() {
+        entries.retain(|entry| matches_search(entry.title.as_deref(), &entry.content, search));
+    }
+    (entries, j.list_journals().unwrap_or_default())
 }
 
 #[derive(Clone)]
@@ -121,8 +137,8 @@ fn page_response(
     let markup = if is_partial_request(headers) {
         detail
     } else {
-        let (entries, journals) = sidebar_data(state, query.journal());
-        templates::page(&entries, active_id, detail, &journals, query.journal())
+        let (entries, journals) = sidebar_data(state, query);
+        templates::page(&entries, active_id, detail, &journals, query)
     };
     Html(markup.into_string())
 }
@@ -138,15 +154,22 @@ async fn entry_handler(
         j.get_entry(id)
     };
     let detail = match result {
-        Ok(Some(entry)) => templates::entry_detail(&entry, query.journal()),
-        _ => templates::message_panel("ENTRY NOT FOUND"),
+        Ok(Some(entry)) => templates::entry_detail(&entry, &query),
+        _ => templates::message_panel("ENTRY NOT FOUND", &query),
     };
 
     page_response(&state, &headers, &query, Some(id), detail)
 }
 
-fn save_redirect(headers: &HeaderMap, id: i64, filter: Option<&str>, journal: &str) -> Response {
-    let query = templates::journal_query(filter.map(|_| journal));
+fn save_redirect(headers: &HeaderMap, id: i64, filter: &ListQuery, data: &EntryForm) -> Response {
+    let (title, journal) = data.normalized_title_and_journal();
+    // Keep a search only if the saved entry still matches it.
+    let query = templates::list_query(
+        filter.journal().map(|_| journal),
+        filter
+            .search()
+            .filter(|search| matches_search(title, &data.content, search)),
+    );
     let url = format!("/entry/{id}{query}");
     if !is_partial_request(headers) {
         return Redirect::to(&url).into_response();
@@ -172,7 +195,7 @@ async fn new_form_handler(
         &headers,
         &query,
         None,
-        templates::entry_form(None, &journals, query.journal()),
+        templates::entry_form(None, &journals, &query),
     )
 }
 
@@ -194,10 +217,9 @@ async fn create_handler(
     };
 
     match result {
-        Ok(id) => save_redirect(&headers, id, query.journal(), journal),
-        Err(_) => {
-            Html(templates::message_panel("ERROR SAVING ENTRY").into_string()).into_response()
-        }
+        Ok(id) => save_redirect(&headers, id, &query, &data),
+        Err(_) => Html(templates::message_panel("ERROR SAVING ENTRY", &query).into_string())
+            .into_response(),
     }
 }
 
@@ -217,8 +239,8 @@ async fn edit_form_handler(
         &query,
         Some(id),
         match result {
-            Ok(Some(entry)) => templates::entry_form(Some(&entry), &journals, query.journal()),
-            _ => templates::message_panel("ENTRY NOT FOUND"),
+            Ok(Some(entry)) => templates::entry_form(Some(&entry), &journals, &query),
+            _ => templates::message_panel("ENTRY NOT FOUND", &query),
         },
     )
 }
@@ -251,13 +273,12 @@ async fn update_handler(
     };
 
     match result {
-        Ok(true) => save_redirect(&headers, id, query.journal(), journal),
+        Ok(true) => save_redirect(&headers, id, &query, &data),
         Ok(false) => {
-            Html(templates::message_panel("ENTRY NOT FOUND").into_string()).into_response()
+            Html(templates::message_panel("ENTRY NOT FOUND", &query).into_string()).into_response()
         }
-        Err(_) => {
-            Html(templates::message_panel("ERROR SAVING ENTRY").into_string()).into_response()
-        }
+        Err(_) => Html(templates::message_panel("ERROR SAVING ENTRY", &query).into_string())
+            .into_response(),
     }
 }
 
@@ -283,6 +304,7 @@ mod tests {
     fn query(journal: &str) -> Query<ListQuery> {
         Query(ListQuery {
             journal: Some(journal.into()),
+            ..ListQuery::default()
         })
     }
 
@@ -290,6 +312,106 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("hx-request", "true".parse().unwrap());
         headers
+    }
+
+    #[tokio::test]
+    async fn search_combines_with_journal_and_matches_titles_or_content_literally() {
+        let state = state();
+        let title_id;
+        let content_id;
+        {
+            let journal = state.journal.lock().unwrap();
+            title_id = journal
+                .create_entry(
+                    NewEntry::new("50%_ready")
+                        .title(Some("Navigation"))
+                        .journal(Some("Ship Operations")),
+                )
+                .unwrap();
+            content_id = journal
+                .create_entry(
+                    NewEntry::new("Navigation array online").journal(Some("Ship Operations")),
+                )
+                .unwrap();
+            journal
+                .create_entry(NewEntry::new("Navigation array online").journal(Some("Personal")))
+                .unwrap();
+        }
+        let filter = ListQuery {
+            journal: Some("Ship Operations".into()),
+            q: Some(" NAVIGATION ".into()),
+        };
+        let (entries, _) = sidebar_data(&state, &filter);
+        let mut ids: Vec<_> = entries.iter().map(|entry| entry.id).collect();
+        ids.sort();
+        assert_eq!(ids, [title_id, content_id]);
+        let page = index_handler(State(state.clone()), Query(filter), HeaderMap::new())
+            .await
+            .0;
+        assert!(page.contains("2 MATCHING ENTRIES"));
+        assert!(page.contains(&format!(
+            "/entry/{title_id}?journal=Ship%20Operations&amp;q=NAVIGATION"
+        )));
+
+        let literal = ListQuery {
+            journal: Some("Ship Operations".into()),
+            q: Some("%_".into()),
+        };
+        let (entries, _) = sidebar_data(&state, &literal);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, title_id);
+        let empty = index_handler(
+            State(state),
+            Query(ListQuery {
+                q: Some("missing phrase".into()),
+                ..ListQuery::default()
+            }),
+            HeaderMap::new(),
+        )
+        .await
+        .0;
+        assert!(empty.contains("NO MATCHING ENTRIES"));
+    }
+
+    #[tokio::test]
+    async fn saves_preserve_search_when_the_entry_matches_and_clear_it_when_it_does_not() {
+        let state = state();
+        let filter = || {
+            Query(ListQuery {
+                journal: Some("Ship Operations".into()),
+                q: Some("navigation".into()),
+            })
+        };
+        let result = create_handler(
+            State(state.clone()),
+            filter(),
+            hx_headers(),
+            Form(EntryForm {
+                title: "Navigation".into(),
+                content: "Online".into(),
+                journal: "Ship Operations".into(),
+                timestamp: None,
+            }),
+        )
+        .await;
+        assert_eq!(
+            result.headers()["hx-redirect"],
+            "/entry/1?journal=Ship%20Operations&q=navigation"
+        );
+        let result = update_handler(
+            State(state),
+            Path(1),
+            filter(),
+            hx_headers(),
+            Form(EntryForm {
+                title: "Medical report".into(),
+                content: "Crew healthy".into(),
+                journal: "Personal".into(),
+                timestamp: None,
+            }),
+        )
+        .await;
+        assert_eq!(result.headers()["hx-redirect"], "/entry/1?journal=Personal");
     }
 
     #[tokio::test]

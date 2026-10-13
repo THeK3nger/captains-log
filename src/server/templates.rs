@@ -1,6 +1,7 @@
 //! HTML for the web interface. Built with maud, which escapes every
 //! interpolated value by default; only `PreEscaped` content is emitted raw.
 
+use super::ListQuery;
 use crate::journal::Entry;
 use crate::time::to_local;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
@@ -28,9 +29,33 @@ fn url_encode(value: &str) -> String {
     })
 }
 
-/// `?journal=...` for URLs that should keep the active journal filter, or "".
-pub fn journal_query(journal: Option<&str>) -> String {
-    journal.map_or_else(String::new, |j| format!("?journal={}", url_encode(j)))
+/// Query string for URLs that keep the active journal and search filters.
+pub fn list_query(journal: Option<&str>, search: Option<&str>) -> String {
+    let mut params = Vec::new();
+    if let Some(journal) = journal {
+        params.push(format!("journal={}", url_encode(journal)));
+    }
+    if let Some(search) = search {
+        params.push(format!("q={}", url_encode(search)));
+    }
+    if params.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", params.join("&"))
+    }
+}
+
+fn divider() -> Markup {
+    html! { div.lcars-divider aria-hidden="true" { span {} span {} span {} } }
+}
+
+fn back_to_logs(query: &ListQuery) -> Markup {
+    html! {
+        a.mobile-back href=(format!("/{}", query.url_query()))
+            hx-get=(format!("/{}", query.url_query())) hx-target="#entry-detail"
+            hx-swap="innerHTML" hx-push-url="true" hx-sync="#entry-detail:replace"
+        { "← BACK TO LOGS" }
+    }
 }
 
 /// Markdown to HTML. Raw HTML inside the markdown is passed through as written.
@@ -44,9 +69,12 @@ fn markdown_to_html(markdown: &str) -> String {
 }
 
 /// A centered message in the detail pane (errors, "not found", ...).
-pub fn message_panel(text: &str) -> Markup {
+pub fn message_panel(text: &str, filter: &ListQuery) -> Markup {
     html! {
-        div.placeholder { div.placeholder-text.alert { (text) } }
+        div.placeholder data-detail-view="message" {
+            (back_to_logs(filter))
+            div.placeholder-text.alert { (text) }
+        }
     }
 }
 
@@ -60,16 +88,18 @@ pub fn select_prompt() -> Markup {
     }
 }
 
-pub fn entry_list(entries: &[Entry], active_id: Option<i64>, journal: Option<&str>) -> Markup {
+pub fn entry_list(entries: &[Entry], active_id: Option<i64>, filter: &ListQuery) -> Markup {
     if entries.is_empty() {
         return html! {
             div.placeholder style="height:100%" {
-                div.placeholder-text { "NO ENTRIES ON RECORD" }
+                div.placeholder-text {
+                    @if filter.search().is_some() { "NO MATCHING ENTRIES" } @else { "NO ENTRIES ON RECORD" }
+                }
             }
         };
     }
 
-    let query = journal_query(journal);
+    let query = filter.url_query();
 
     html! {
         @for entry in entries {
@@ -102,15 +132,16 @@ pub fn entry_list(entries: &[Entry], active_id: Option<i64>, journal: Option<&st
     }
 }
 
-pub fn entry_detail(entry: &Entry, journal: Option<&str>) -> Markup {
+pub fn entry_detail(entry: &Entry, filter: &ListQuery) -> Markup {
     let title = entry.title.as_deref().unwrap_or("UNTITLED ENTRY");
     let date = to_local(&entry.timestamp, None).format("%Y-%m-%d %H:%M:%S");
 
-    let query = journal_query(journal);
+    let query = filter.url_query();
     html! {
-        article data-entry-id=(entry.id) {
+        article data-entry-id=(entry.id) data-detail-view="entry" {
+            (back_to_logs(filter))
             div.ed-header {
-                div.ed-title { (title) }
+                h2.ed-title tabindex="-1" { (title) }
                 div.ed-meta-row {
                     span.ed-meta {
                         (date) " \u{a0}·\u{a0} " (entry.journal) " \u{a0}·\u{a0} ID #" (entry.id)
@@ -123,6 +154,7 @@ pub fn entry_detail(entry: &Entry, journal: Option<&str>) -> Markup {
                         hx-sync="#entry-detail:replace"
                     { "EDIT" }
                 }
+                (divider())
             }
             @if let Some(path) = &entry.audio_path {
                 div.ed-audio { "🎤 " (path) }
@@ -133,8 +165,8 @@ pub fn entry_detail(entry: &Entry, journal: Option<&str>) -> Markup {
 }
 
 /// The create form (`entry` is `None`) or the edit form for an existing entry.
-pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: Option<&str>) -> Markup {
-    let query = journal_query(filter);
+pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: &ListQuery) -> Markup {
+    let query = filter.url_query();
     let (action, heading, cancel_target) = match entry {
         Some(e) => (
             format!("/entry/{}/edit", e.id),
@@ -144,12 +176,15 @@ pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: Option<&st
         None => ("/entries".to_string(), "NEW ENTRY", "/".to_string()),
     };
     let title = entry.and_then(|e| e.title.as_deref()).unwrap_or("");
-    let journal = entry.map_or(filter.unwrap_or("Personal"), |e| e.journal.as_str());
+    let journal = entry.map_or(filter.journal().unwrap_or("Personal"), |e| {
+        e.journal.as_str()
+    });
     let content = entry.map_or("", |e| e.content.as_str());
 
     html! {
-        div.entry-form data-entry-id=[entry.map(|e| e.id)] {
-            div.form-title-bar { div.form-heading { (heading) } }
+        div.entry-form data-entry-id=[entry.map(|e| e.id)] data-detail-view="form" {
+            (back_to_logs(filter))
+            div.form-title-bar { h2.form-heading { (heading) } (divider()) }
             form action=(format!("{action}{query}")) method="post"
                 hx-post=(format!("{action}{query}")) hx-target="#entry-detail" hx-swap="innerHTML"
                 hx-disabled-elt="#entry-detail .btn-save" {
@@ -190,14 +225,16 @@ pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: Option<&st
 }
 
 /// The full page: sidebar, entry list and `detail` in the main pane.
-/// `journals` fills the sidebar; `journal` is the journal the list is filtered to.
+/// `journals` fills the sidebar; `filter` scopes the entry list and navigation.
 pub fn page(
     entries: &[Entry],
     active_id: Option<i64>,
     detail: Markup,
     journals: &[String],
-    journal: Option<&str>,
+    filter: &ListQuery,
 ) -> Markup {
+    let journal = filter.journal();
+    let search = filter.search();
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -214,7 +251,7 @@ pub fn page(
                 div.lcars {
                     div.tl-elbow {}
                     div.top-bar {
-                        div.tb-title { "CAPTAIN'S LOG" }
+                        div.tb-title { h1.tb-name { "CAPTAIN'S LOG" } }
                         div.tb-seg {}
                         div.tb-seg.sm {}
                         div.tb-cap {}
@@ -222,20 +259,21 @@ pub fn page(
 
                     nav.sidebar aria-label="Journals" {
                         div.sb-stem {}
-                        a.sb-btn.c-salmon href=(format!("/form/new{}", journal_query(journal)))
-                            hx-get=(format!("/form/new{}", journal_query(journal)))
+                        a.sb-btn.c-salmon href=(format!("/form/new{}", filter.url_query()))
+                            data-action="new-entry" title="New entry (N)"
+                            hx-get=(format!("/form/new{}", filter.url_query()))
                             hx-target="#entry-detail" hx-swap="innerHTML" hx-push-url="true"
                             hx-sync="#entry-detail:replace"
                         { "NEW ENTRY" }
                         div.sb-links {
                             a class=(if journal.is_none() { "sb-btn c-tan active" } else { "sb-btn c-tan" })
-                                href="/" aria-current=[journal.is_none().then_some("page")]
+                                href=(format!("/{}", list_query(None, search))) aria-current=[journal.is_none().then_some("page")]
                             { "ALL ENTRIES" }
                             @for (i, name) in journals.iter().enumerate() {
                                 @let color = JOURNAL_COLORS[i % JOURNAL_COLORS.len()];
                                 @let active = journal == Some(name.as_str());
                                 a class=(format!("sb-btn c-{color}{}", if active { " active" } else { "" }))
-                                    href=(format!("/{}", journal_query(Some(name))))
+                                    href=(format!("/{}", list_query(Some(name), search)))
                                     aria-current=[active.then_some("page")] title=(name)
                                 { span.sb-label { (name) } }
                             }
@@ -245,7 +283,21 @@ pub fn page(
                     div.mobile-rail aria-hidden="true" {}
 
                     div.main {
-                        div.entry-list #entry-list aria-label="Entries" { (entry_list(entries, active_id, journal)) }
+                        section.entry-browser aria-label="Browse logs" {
+                            form.list-search action="/" method="get" role="search" {
+                                label.form-label for="log-search" { "SEARCH LOGS" }
+                                @if let Some(journal) = journal { input type="hidden" name="journal" value=(journal); }
+                                div.search-controls {
+                                    input.form-input #log-search type="search" name="q" value=(search.unwrap_or(""))
+                                        placeholder="Title or content…" autocomplete="off";
+                                    button.search-submit type="submit" { "SEARCH" }
+                                }
+                                @if search.is_some() {
+                                    a.search-clear href=(format!("/{}", list_query(journal, None))) { "CLEAR SEARCH" }
+                                }
+                            }
+                            div.entry-list #entry-list aria-label="Entries" { (entry_list(entries, active_id, filter)) }
+                        }
                         main.entry-detail #entry-detail aria-label="Entry detail" { (detail) }
                     }
 
@@ -253,9 +305,11 @@ pub fn page(
                     div.bottom-bar {
                         div.bb-text {
                             span.bb-label title=[journal] {
-                                (entries.len()) " ENTRIES ON RECORD"
+                                (entries.len())
+                                @if search.is_some() { " MATCHING ENTRIES" } @else { " ENTRIES ON RECORD" }
                                 @if let Some(name) = journal { " · " (name) }
                             }
+                            span.keyboard-help title="J/K: next/previous log · N: new entry · Esc: cancel editing" { "J/K · N · ESC" }
                         }
                         div.bb-seg { "v" (env!("CARGO_PKG_VERSION")) }
                         div.bb-cap {}
