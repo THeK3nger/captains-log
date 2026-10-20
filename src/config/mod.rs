@@ -6,24 +6,30 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
     pub database: DatabaseConfig,
+    #[serde(default)]
     pub editor: EditorConfig,
+    #[serde(default)]
     pub display: DisplayConfig,
     #[serde(default)]
     pub audio: AudioConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DatabaseConfig {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EditorConfig {
     pub command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DisplayConfig {
     pub colors_enabled: bool,
     pub date_format: String,
@@ -59,6 +65,18 @@ pub struct AudioConfig {
     pub sample_rate: u32,
 }
 
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        DisplayConfig {
+            colors_enabled: true,
+            date_format: "%Y-%m-%d %H:%M:%S".to_string(),
+            entries_per_page: Some(20),
+            stardate_mode: false,
+            timezone: None,
+        }
+    }
+}
+
 fn default_whisper_model() -> String {
     "base.en".to_string()
 }
@@ -89,15 +107,9 @@ impl Default for Config {
         // Find default project directories
 
         Config {
-            database: DatabaseConfig { path: None },
-            editor: EditorConfig { command: None },
-            display: DisplayConfig {
-                colors_enabled: true,
-                date_format: "%Y-%m-%d %H:%M:%S".to_string(),
-                entries_per_page: Some(20),
-                stardate_mode: false,
-                timezone: None,
-            },
+            database: DatabaseConfig::default(),
+            editor: EditorConfig::default(),
+            display: DisplayConfig::default(),
             audio: AudioConfig::default(),
         }
     }
