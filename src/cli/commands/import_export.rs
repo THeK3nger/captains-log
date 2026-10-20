@@ -69,18 +69,8 @@ pub struct ImportArgs {
     pub journal: Option<String>,
 }
 
-pub fn export(
-    journal: &Journal,
-    config: &Config,
-    args: ExportArgs,
-    global_journal: Option<&str>,
-) -> Result<()> {
-    let filters = create_export_filters(
-        args.date,
-        args.since,
-        args.until,
-        args.journal.or_else(|| global_journal.map(str::to_string)),
-    );
+pub fn export(journal: &Journal, config: &Config, args: ExportArgs) -> Result<()> {
+    let filters = create_export_filters(args.date, args.since, args.until, args.journal);
     handle_export_command(
         journal,
         args.output,
@@ -90,18 +80,13 @@ pub fn export(
     )
 }
 
-pub fn import(
-    journal: &Journal,
-    config: &Config,
-    args: ImportArgs,
-    global_journal: Option<&str>,
-) -> Result<()> {
+pub fn import(journal: &Journal, config: &Config, args: ImportArgs) -> Result<()> {
     handle_import_command(
         journal,
         &args.path,
         args.format,
         args.date,
-        args.journal.or_else(|| global_journal.map(str::to_string)),
+        args.journal,
         config.get_timezone(),
     )
 }

@@ -130,10 +130,9 @@ pub fn handle_command(
     journal: &Journal,
     config: &Config,
     db_path: &std::path::Path,
-    global_journal: Option<&str>,
 ) -> Result<()> {
     match command {
-        Commands::List(args) => list_entries(journal, config, args, global_journal),
+        Commands::List(args) => list_entries(journal, config, args),
         Commands::Show { id } => show_entry(journal, config, id),
         Commands::Search { query } => search_entries(journal, config, &query),
         Commands::Delete {
@@ -149,26 +148,15 @@ pub fn handle_command(
         Commands::New {
             journal: new_journal,
             content,
-        } => create_entry(
-            journal,
-            config,
-            content,
-            new_journal.as_deref().or(global_journal),
-        ),
+        } => create_entry(journal, config, content, new_journal.as_deref()),
         Commands::Calendar {
             year,
             month,
             journal: calendar_journal,
-        } => show_calendar(
-            journal,
-            year,
-            month,
-            calendar_journal.as_deref().or(global_journal),
-            config,
-        ),
+        } => show_calendar(journal, year, month, calendar_journal.as_deref(), config),
         Commands::Config { action } => handle_config_command(action, config),
-        Commands::Export(args) => export(journal, config, args, global_journal),
-        Commands::Import(args) => import(journal, config, args, global_journal),
+        Commands::Export(args) => export(journal, config, args),
+        Commands::Import(args) => import(journal, config, args),
         Commands::Record {
             journal: record_journal,
             no_transcribe,
@@ -177,7 +165,7 @@ pub fn handle_command(
             journal,
             config,
             db_path,
-            record_journal.or_else(|| global_journal.map(str::to_string)),
+            record_journal,
             no_transcribe,
             max_duration,
         ),

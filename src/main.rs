@@ -26,10 +26,6 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Journal category (global option for all commands)
-    #[arg(long, global = true)]
-    journal: Option<String>,
-
     /// Override database file location
     #[arg(short = 'd', long = "database", global = true)]
     database_file: Option<String>,
@@ -59,7 +55,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(command) => {
-            cli::handle_command(command, &journal, &config, &db_path, cli.journal.as_deref())?;
+            cli::handle_command(command, &journal, &config, &db_path)?;
         }
         None => {
             Cli::command().print_help()?;

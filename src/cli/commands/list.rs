@@ -43,12 +43,7 @@ pub struct ListArgs {
     pub oldest_first: bool,
 }
 
-pub fn list_entries(
-    journal: &Journal,
-    config: &Config,
-    args: ListArgs,
-    global_journal: Option<&str>,
-) -> Result<()> {
+pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Result<()> {
     let ListArgs {
         date,
         since,
@@ -63,7 +58,7 @@ pub fn list_entries(
         anyhow::bail!("--limit must be greater than 0");
     }
 
-    let journal_filter = list_journal.as_deref().or(global_journal);
+    let journal_filter = list_journal.as_deref();
     let filters = parse_entry_filters(
         date.as_deref(),
         since.as_deref(),
