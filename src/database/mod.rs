@@ -24,6 +24,17 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_entries_timestamp ON entries(timestamp);
     CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries(created_at);
     CREATE INDEX IF NOT EXISTS idx_entries_journal_timestamp ON entries(journal, timestamp);",
+    // 2: tags. Names are unique ignoring case; links go away with their entry.
+    "CREATE TABLE tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+    );
+    CREATE TABLE entry_tags (
+        entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY (entry_id, tag_id)
+    );
+    CREATE INDEX idx_entry_tags_tag ON entry_tags(tag_id, entry_id);",
 ];
 
 /// Bring the database up to the latest schema version. Each migration runs in
@@ -76,6 +87,8 @@ impl Database {
 
         let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open database at {:?}", db_path))?;
+        // Off by default in SQLite; needed for ON DELETE CASCADE on entry_tags.
+        conn.pragma_update(None, "foreign_keys", true)?;
 
         let mut db = Database { conn };
         db.run_migrations()?;

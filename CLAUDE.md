@@ -12,6 +12,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Import System** - ORG-journal and DayOne JSON import functionality with date and journal filtering
 ✅ **Database Override** - CLI parameter to override database location for any command
 ✅ **Quick Entry Creation** - Create entries with inline content or using external editor
+✅ **Tags** - Inline `#tags` plus explicit `--tag`, filtering (AND) in list/search/export, `cl tags` management
 ✅ **Stardate Mode Integration** - Consistent stardate formatting across all entry display commands
 
 ## Build & Test Commands
@@ -112,6 +113,17 @@ cargo build
 ./target/debug/cl -d "path/to/custom.db" new "Entry with custom database"
 ./target/debug/cl --database "/tmp/temp.db" list
 ./target/debug/cl -d "backup.db" export --output backup.json --format json
+
+# Tags: #tags written in the text are picked up automatically; --tag adds extra ones
+./target/debug/cl new "Call with Ana about #pricing" --tag urgent
+./target/debug/cl list --tag pricing --tag urgent     # entries having ALL the tags
+./target/debug/cl search "call" --tag pricing
+./target/debug/cl export --output p.json --tag pricing --format json
+./target/debug/cl tags                                # tags with entry counts
+./target/debug/cl tags add <id> <tag>...
+./target/debug/cl tags remove <id> <tag>...           # not for #tags written in the text
+./target/debug/cl tags rename <old> <new>             # also rewrites #old in entry texts; merges
+./target/debug/cl tags reindex                        # rescan all texts (entries saved before tagging)
 
 # Show help
 ./target/debug/cl --help

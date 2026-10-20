@@ -1,3 +1,4 @@
+use crate::cli::dateparser::parse_tags;
 use crate::config::Config;
 use crate::journal::{Journal, NewEntry};
 use anyhow::Result;
@@ -8,6 +9,7 @@ pub fn handle_record_command(
     config: &Config,
     db_path: &std::path::Path,
     journal_category: Option<String>,
+    tags: &[String],
     no_transcribe: bool,
     max_duration: Option<u64>,
 ) -> Result<()> {
@@ -15,6 +17,9 @@ pub fn handle_record_command(
         ensure_audio_directory_exists, generate_audio_filename, get_audio_directory, record_audio,
         transcribe_audio,
     };
+
+    // Check the tags before recording, so a typo doesn't cost a take
+    let tags = parse_tags(tags)?;
 
     // Ensure audio directory exists
     ensure_audio_directory_exists(db_path)?;
@@ -68,7 +73,8 @@ pub fn handle_record_command(
     let entry_id = journal_obj.create_entry(
         NewEntry::new(&transcription)
             .journal(journal_category.as_deref())
-            .audio_path(Some(&relative_path)),
+            .audio_path(Some(&relative_path))
+            .tags(&tags),
     )?;
 
     println!(

@@ -308,7 +308,14 @@ async fn update_handler(
                 };
 
                 timestamp.and_then(|timestamp| {
-                    j.update_entry_with_metadata(id, title, data.content.trim(), journal, timestamp)
+                    j.update_entry_with_metadata(
+                        id,
+                        title,
+                        data.content.trim(),
+                        journal,
+                        timestamp,
+                        &entry.extra_tags(),
+                    )
                 })
             }
             Ok(None) => Ok(false),

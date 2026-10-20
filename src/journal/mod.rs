@@ -1,3 +1,5 @@
+mod tags;
+
 use std::fmt;
 
 use crate::database::Database;
@@ -5,8 +7,11 @@ use crate::time::{days_in_month, next_day_start_utc, start_of_day_utc};
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
+
+pub use tags::normalize_tag;
+use tags::{extract_tags, rename_in_text};
 
 const ENTRY_SELECT: &str = r#"
     SELECT id, timestamp, title, content, audio_path, image_paths,
@@ -23,6 +28,9 @@ pub struct Entry {
     pub audio_path: Option<String>,
     pub image_paths: Vec<String>,
     pub journal: String,
+    /// Normalized tag names, sorted. Inline `#tags` plus explicitly added ones.
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -45,9 +53,20 @@ impl Entry {
             journal: row
                 .get("journal")
                 .unwrap_or_else(|_| DEFAULT_JOURNAL.to_string()),
+            tags: Vec::new(),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
+    }
+
+    /// Tags that are not written as `#tag` in the title or content.
+    pub fn extra_tags(&self) -> Vec<String> {
+        let inline = inline_tags(self.title.as_deref(), &self.content);
+        self.tags
+            .iter()
+            .filter(|tag| !inline.contains(tag))
+            .cloned()
+            .collect()
     }
 
     pub fn get_summary(&self, summary_size: usize) -> String {
@@ -88,6 +107,7 @@ pub struct NewEntry<'a> {
     journal: Option<&'a str>,
     timestamp: Option<DateTime<Utc>>,
     audio_path: Option<&'a str>,
+    tags: &'a [String],
 }
 
 impl<'a> NewEntry<'a> {
@@ -98,6 +118,7 @@ impl<'a> NewEntry<'a> {
             journal: None,
             timestamp: None,
             audio_path: None,
+            tags: &[],
         }
     }
 
@@ -118,6 +139,12 @@ impl<'a> NewEntry<'a> {
 
     pub fn audio_path(mut self, audio_path: Option<&'a str>) -> Self {
         self.audio_path = audio_path;
+        self
+    }
+
+    /// Tags besides the `#tags` written in the title and content.
+    pub fn tags(mut self, tags: &'a [String]) -> Self {
+        self.tags = tags;
         self
     }
 }
@@ -144,6 +171,8 @@ pub struct EntryFilters {
     pub since: Option<NaiveDate>,
     pub until: Option<NaiveDate>,
     pub journal: Option<String>,
+    /// Entries must have all of these (normalized) tags.
+    pub tags: Vec<String>,
 }
 
 impl EntryFilters {
@@ -152,6 +181,7 @@ impl EntryFilters {
             || self.since.is_some()
             || self.until.is_some()
             || self.journal.is_some()
+            || !self.tags.is_empty()
     }
 
     pub fn for_month(year: i32, month: u32, journal: Option<&str>) -> Result<Self> {
@@ -223,6 +253,60 @@ impl fmt::Display for Entry {
     }
 }
 
+/// A tag and the number of entries that have it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagCount {
+    pub name: String,
+    pub count: usize,
+}
+
+/// Distinct tags written inline in an entry's title and content.
+fn inline_tags(title: Option<&str>, content: &str) -> Vec<String> {
+    let mut tags = title.map(extract_tags).unwrap_or_default();
+    for tag in extract_tags(content) {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
+}
+
+/// Inline tags of the text plus `extra` (validated and normalized), sorted and deduplicated.
+fn resolve_tags(title: Option<&str>, content: &str, extra: &[String]) -> Result<Vec<String>> {
+    let mut tags = inline_tags(title, content);
+    for raw in extra {
+        let tag = normalize_tag(raw).with_context(|| {
+            format!("Invalid tag '{raw}': tags start with a letter and contain only letters, digits, '-' and '_'")
+        })?;
+        tags.push(tag);
+    }
+    tags.sort();
+    tags.dedup();
+    Ok(tags)
+}
+
+/// Replace the tags of an entry with `tags` (already normalized), creating missing ones.
+fn write_entry_tags(conn: &Connection, entry_id: i64, tags: &[String]) -> Result<()> {
+    conn.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
+    for tag in tags {
+        conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [tag])?;
+        conn.execute(
+            "INSERT INTO entry_tags (entry_id, tag_id)
+             SELECT ?1, id FROM tags WHERE name = ?2",
+            params![entry_id, tag],
+        )?;
+    }
+    Ok(())
+}
+
+fn delete_unused_tags(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM entry_tags)",
+        [],
+    )?;
+    Ok(())
+}
+
 pub struct Journal {
     db: Database,
     timezone: Option<Tz>,
@@ -244,8 +328,10 @@ impl Journal {
         let conn = self.db.connection();
         let now = Utc::now();
         let timestamp = entry.timestamp.unwrap_or(now);
+        let tags = resolve_tags(entry.title, entry.content, entry.tags)?;
+        let tx = conn.unchecked_transaction()?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO entries (timestamp, title, content, journal, audio_path, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -259,16 +345,25 @@ impl Journal {
             ],
         )?;
 
-        Ok(conn.last_insert_rowid())
+        let id = tx.last_insert_rowid();
+        write_entry_tags(&tx, id, &tags)?;
+        tx.commit()?;
+
+        Ok(id)
     }
 
     pub fn get_entry(&self, id: i64) -> Result<Option<Entry>> {
         let conn = self.db.connection();
         let mut stmt = conn.prepare(&format!("{ENTRY_SELECT} WHERE id = ?1"))?;
 
-        stmt.query_row([id], Entry::from_row)
-            .optional()
-            .map_err(Into::into)
+        let mut entries: Vec<Entry> = stmt
+            .query_row([id], Entry::from_row)
+            .optional()?
+            .into_iter()
+            .collect();
+        self.load_tags(&mut entries)?;
+
+        Ok(entries.pop())
     }
 
     pub fn list_entries(&self) -> Result<Vec<Entry>> {
@@ -299,7 +394,10 @@ impl Journal {
     pub fn delete_entry(&self, id: i64) -> Result<bool> {
         let conn = self.db.connection();
 
-        let rows_affected = conn.execute("DELETE FROM entries WHERE id = ?1", [id])?;
+        let tx = conn.unchecked_transaction()?;
+        let rows_affected = tx.execute("DELETE FROM entries WHERE id = ?1", [id])?;
+        delete_unused_tags(&tx)?;
+        tx.commit()?;
 
         Ok(rows_affected > 0)
     }
@@ -312,6 +410,8 @@ impl Journal {
     /// * `content` - The new content for the entry.
     /// * `journal` - The new journal for the entry.
     /// * `timestamp` - The new timestamp for the entry.
+    /// * `extra_tags` - Tags to keep besides the `#tags` written in the title and content.
+    ///   The entry's tags are replaced by these plus the inline ones.
     ///
     /// # Returns
     /// * `Result<bool>` - Ok(true) if the entry was updated, Ok(false) if not found, Err on error.
@@ -322,14 +422,22 @@ impl Journal {
         content: &str,
         journal: &str,
         timestamp: DateTime<Utc>,
+        extra_tags: &[String],
     ) -> Result<bool> {
         let conn = self.db.connection();
         let now = Utc::now();
+        let tags = resolve_tags(title, content, extra_tags)?;
+        let tx = conn.unchecked_transaction()?;
 
-        let rows_affected = conn.execute(
+        let rows_affected = tx.execute(
             "UPDATE entries SET title = ?1, content = ?2, journal = ?3, timestamp = ?4, updated_at = ?5 WHERE id = ?6",
             params![title, content, journal, timestamp, now, id],
         )?;
+        if rows_affected > 0 {
+            write_entry_tags(&tx, id, &tags)?;
+            delete_unused_tags(&tx)?;
+        }
+        tx.commit()?;
 
         Ok(rows_affected > 0)
     }
@@ -420,6 +528,13 @@ impl Journal {
             conditions.push("journal = ?");
             params.push(Box::new(journal.to_string()));
         }
+        for tag in &filters.tags {
+            conditions.push(
+                "EXISTS (SELECT 1 FROM entry_tags et JOIN tags t ON t.id = et.tag_id
+                         WHERE et.entry_id = entries.id AND t.name = ?)",
+            );
+            params.push(Box::new(tag.clone()));
+        }
 
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -455,14 +570,358 @@ impl Journal {
         for entry in entry_iter {
             entries.push(entry?);
         }
+        self.load_tags(&mut entries)?;
 
         Ok(entries)
+    }
+
+    /// Fill in `tags` for `entries` with a few queries instead of one per entry.
+    fn load_tags(&self, entries: &mut [Entry]) -> Result<()> {
+        // Stay well below SQLite's limit on bound parameters.
+        const CHUNK: usize = 500;
+        let conn = self.db.connection();
+
+        for chunk in entries.chunks_mut(CHUNK) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut stmt = conn.prepare(&format!(
+                "SELECT et.entry_id, t.name FROM entry_tags et
+                 JOIN tags t ON t.id = et.tag_id
+                 WHERE et.entry_id IN ({placeholders})
+                 ORDER BY t.name"
+            ))?;
+            let ids = chunk.iter().map(|entry| entry.id);
+            let rows = stmt.query_map(rusqlite::params_from_iter(ids), |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (entry_id, name) = row?;
+                if let Some(entry) = chunk.iter_mut().find(|entry| entry.id == entry_id) {
+                    entry.tags.push(name);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// All tags in use with their entry counts, most used first.
+    pub fn list_tags(&self) -> Result<Vec<TagCount>> {
+        let mut stmt = self.db.connection().prepare(
+            "SELECT t.name, COUNT(*) AS uses FROM tags t
+             JOIN entry_tags et ON et.tag_id = t.id
+             GROUP BY t.id ORDER BY uses DESC, t.name ASC",
+        )?;
+        let tags = stmt
+            .query_map([], |row| {
+                Ok(TagCount {
+                    name: row.get(0)?,
+                    count: usize::try_from(row.get::<_, i64>(1)?).unwrap_or_default(),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tags)
+    }
+
+    /// Add explicit tags to an entry. Returns false if the entry does not exist.
+    pub fn add_tags(&self, id: i64, tags: &[String]) -> Result<bool> {
+        let Some(entry) = self.get_entry(id)? else {
+            return Ok(false);
+        };
+        let mut extra = entry.extra_tags();
+        extra.extend_from_slice(tags);
+        self.update_entry_with_metadata(
+            id,
+            entry.title.as_deref(),
+            &entry.content,
+            &entry.journal,
+            entry.timestamp,
+            &extra,
+        )?;
+        Ok(true)
+    }
+
+    /// Remove explicit tags from an entry. Tags written as `#tag` in the text
+    /// can only be removed by editing the text. Returns false if the entry does not exist.
+    pub fn remove_tags(&self, id: i64, tags: &[String]) -> Result<bool> {
+        let Some(entry) = self.get_entry(id)? else {
+            return Ok(false);
+        };
+        let inline = inline_tags(entry.title.as_deref(), &entry.content);
+        let mut remove = Vec::new();
+        for raw in tags {
+            let tag = normalize_tag(raw).with_context(|| format!("Invalid tag '{raw}'"))?;
+            if inline.contains(&tag) {
+                anyhow::bail!(
+                    "#{tag} is written in the text of entry {id}; edit the entry to remove it"
+                );
+            }
+            if !entry.tags.contains(&tag) {
+                anyhow::bail!("Entry {id} does not have the tag #{tag}");
+            }
+            remove.push(tag);
+        }
+        let extra: Vec<String> = entry
+            .extra_tags()
+            .into_iter()
+            .filter(|tag| !remove.contains(tag))
+            .collect();
+        self.update_entry_with_metadata(
+            id,
+            entry.title.as_deref(),
+            &entry.content,
+            &entry.journal,
+            entry.timestamp,
+            &extra,
+        )?;
+        Ok(true)
+    }
+
+    /// Recompute every entry's inline tags from its text, keeping explicit
+    /// tags. Returns the number of entries whose tags changed.
+    pub fn reindex_tags(&self) -> Result<usize> {
+        let entries = self.list_entries()?;
+        let tx = self.db.connection().unchecked_transaction()?;
+        let mut changed = 0;
+
+        for entry in &entries {
+            let tags = resolve_tags(entry.title.as_deref(), &entry.content, &entry.extra_tags())?;
+            if tags != entry.tags {
+                write_entry_tags(&tx, entry.id, &tags)?;
+                changed += 1;
+            }
+        }
+        delete_unused_tags(&tx)?;
+        tx.commit()?;
+
+        Ok(changed)
+    }
+
+    /// Rename a tag everywhere, rewriting `#old` in entry texts too. If `new`
+    /// already exists the two are merged. Returns the number of entries changed.
+    pub fn rename_tag(&self, old: &str, new: &str) -> Result<usize> {
+        let old = normalize_tag(old).with_context(|| format!("Invalid tag '{old}'"))?;
+        let new = normalize_tag(new).with_context(|| format!("Invalid tag '{new}'"))?;
+
+        let filters = EntryFilters {
+            tags: vec![old.clone()],
+            ..EntryFilters::default()
+        };
+        let entries = self.list_entries_filtered(&filters)?;
+        let tx = self.db.connection().unchecked_transaction()?;
+        let now = Utc::now();
+
+        for entry in &entries {
+            let title = entry
+                .title
+                .as_deref()
+                .map(|t| rename_in_text(t, &old, &new));
+            let content = rename_in_text(&entry.content, &old, &new);
+            let mut tags: Vec<String> = entry
+                .tags
+                .iter()
+                .map(|tag| {
+                    if *tag == old {
+                        new.clone()
+                    } else {
+                        tag.clone()
+                    }
+                })
+                .collect();
+            tags.sort();
+            tags.dedup();
+
+            tx.execute(
+                "UPDATE entries SET title = ?1, content = ?2, updated_at = ?3 WHERE id = ?4",
+                params![title, content, now, entry.id],
+            )?;
+            write_entry_tags(&tx, entry.id, &tags)?;
+        }
+        delete_unused_tags(&tx)?;
+        tx.commit()?;
+
+        Ok(entries.len())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn journal() -> Journal {
+        Journal::new(Database::new_with_path(":memory:").unwrap())
+    }
+
+    fn tag_filter(tags: &[&str]) -> EntryFilters {
+        EntryFilters {
+            tags: tags.iter().map(|tag| tag.to_string()).collect(),
+            ..EntryFilters::default()
+        }
+    }
+
+    #[test]
+    fn inline_and_explicit_tags_are_stored_sorted() {
+        let j = journal();
+        let extra = vec!["#Urgent".to_string(), "pricing".to_string()];
+        let id = j
+            .create_entry(
+                NewEntry::new("Met Ana about #pricing and #Q4")
+                    .title(Some("Sync #work"))
+                    .tags(&extra),
+            )
+            .unwrap();
+
+        let entry = j.get_entry(id).unwrap().unwrap();
+        assert_eq!(entry.tags, ["pricing", "q4", "urgent", "work"]);
+        assert_eq!(entry.extra_tags(), ["urgent"]);
+    }
+
+    #[test]
+    fn invalid_explicit_tag_is_rejected_and_nothing_is_saved() {
+        let j = journal();
+        let bad = vec!["two words".to_string()];
+        assert!(j.create_entry(NewEntry::new("x").tags(&bad)).is_err());
+        assert!(j.list_entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn tag_filters_require_all_tags() {
+        let j = journal();
+        j.create_entry(NewEntry::new("#a #b one")).unwrap();
+        j.create_entry(NewEntry::new("#a two")).unwrap();
+        j.create_entry(NewEntry::new("none")).unwrap();
+
+        let both = j.list_entries_filtered(&tag_filter(&["a", "b"])).unwrap();
+        assert_eq!(both.len(), 1);
+        assert_eq!(j.count_entries(&tag_filter(&["a"])).unwrap(), 2);
+        assert_eq!(j.count_entries(&tag_filter(&["A"])).unwrap(), 2);
+        assert_eq!(j.count_entries(&tag_filter(&["zzz"])).unwrap(), 0);
+    }
+
+    #[test]
+    fn update_recomputes_inline_tags_and_keeps_extras() {
+        let j = journal();
+        let extra = vec!["keep".to_string()];
+        let id = j
+            .create_entry(NewEntry::new("#old text").tags(&extra))
+            .unwrap();
+        let entry = j.get_entry(id).unwrap().unwrap();
+
+        j.update_entry_with_metadata(
+            id,
+            None,
+            "#new text",
+            &entry.journal,
+            entry.timestamp,
+            &entry.extra_tags(),
+        )
+        .unwrap();
+
+        let entry = j.get_entry(id).unwrap().unwrap();
+        assert_eq!(entry.tags, ["keep", "new"]);
+        assert!(j.list_tags().unwrap().iter().all(|t| t.name != "old"));
+    }
+
+    #[test]
+    fn deleting_an_entry_drops_its_links_and_unused_tags() {
+        let j = journal();
+        let a = j.create_entry(NewEntry::new("#shared #solo")).unwrap();
+        j.create_entry(NewEntry::new("#shared")).unwrap();
+
+        assert!(j.delete_entry(a).unwrap());
+
+        assert_eq!(
+            j.list_tags().unwrap(),
+            [TagCount {
+                name: "shared".into(),
+                count: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn add_and_remove_explicit_tags() {
+        let j = journal();
+        let id = j.create_entry(NewEntry::new("#inline text")).unwrap();
+
+        assert!(j.add_tags(id, &["extra".to_string()]).unwrap());
+        assert_eq!(j.get_entry(id).unwrap().unwrap().tags, ["extra", "inline"]);
+
+        let err = j.remove_tags(id, &["inline".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("edit the entry"), "{err}");
+        let err = j.remove_tags(id, &["nope".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("does not have"), "{err}");
+
+        assert!(j.remove_tags(id, &["extra".to_string()]).unwrap());
+        assert_eq!(j.get_entry(id).unwrap().unwrap().tags, ["inline"]);
+        assert!(!j.add_tags(999, &["x".to_string()]).unwrap());
+    }
+
+    #[test]
+    fn rename_rewrites_text_and_merges_with_existing_tags() {
+        let j = journal();
+        let extra = vec!["draft".to_string()];
+        let a = j
+            .create_entry(NewEntry::new("about #draft and #final").tags(&extra))
+            .unwrap();
+        let b = j
+            .create_entry(NewEntry::new("only #draft here").title(Some("#draft")))
+            .unwrap();
+        let other = j.create_entry(NewEntry::new("#other")).unwrap();
+
+        assert_eq!(j.rename_tag("Draft", "final").unwrap(), 2);
+
+        let a = j.get_entry(a).unwrap().unwrap();
+        assert_eq!(a.content, "about #final and #final");
+        assert_eq!(a.tags, ["final"]);
+        let b = j.get_entry(b).unwrap().unwrap();
+        assert_eq!(b.content, "only #final here");
+        assert_eq!(b.title.as_deref(), Some("#final"));
+        assert_eq!(b.tags, ["final"]);
+        assert_eq!(j.get_entry(other).unwrap().unwrap().tags, ["other"]);
+        assert_eq!(
+            j.list_tags()
+                .unwrap()
+                .iter()
+                .map(|t| t.count)
+                .collect::<Vec<_>>(),
+            [2, 1]
+        );
+    }
+
+    #[test]
+    fn reindex_tags_entries_that_predate_tagging_and_keeps_extras() {
+        let j = journal();
+        let extra = vec!["keep".to_string()];
+        let tagged = j
+            .create_entry(NewEntry::new("#fresh").tags(&extra))
+            .unwrap();
+        let old = j
+            .create_entry(NewEntry::new("written before #tags"))
+            .unwrap();
+        // Simulate entries saved before tagging existed
+        j.db.connection()
+            .execute("DELETE FROM entry_tags WHERE entry_id = ?1", [old])
+            .unwrap();
+
+        assert_eq!(j.reindex_tags().unwrap(), 1);
+        assert_eq!(j.get_entry(old).unwrap().unwrap().tags, ["tags"]);
+        assert_eq!(
+            j.get_entry(tagged).unwrap().unwrap().tags,
+            ["fresh", "keep"]
+        );
+        assert_eq!(j.reindex_tags().unwrap(), 0);
+    }
+
+    #[test]
+    fn many_entries_load_their_tags() {
+        let j = journal();
+        for i in 0..1200 {
+            j.create_entry(NewEntry::new(&format!("entry {i} #t{}", i % 3)))
+                .unwrap();
+        }
+        let entries = j.list_entries().unwrap();
+        assert_eq!(entries.len(), 1200);
+        assert!(entries.iter().all(|entry| entry.tags.len() == 1));
+    }
 
     #[test]
     fn truncation_is_unicode_safe() {

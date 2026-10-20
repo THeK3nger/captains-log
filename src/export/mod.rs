@@ -135,6 +135,7 @@ impl<'a> Exporter<'a> {
                 filters.since.as_deref(),
                 filters.until.as_deref(),
                 filters.journal.as_deref(),
+                &filters.tags,
                 self.timezone,
             )?;
 
@@ -186,6 +187,7 @@ pub struct ExportFilters {
     pub since: Option<String>,
     pub until: Option<String>,
     pub journal: Option<String>,
+    pub tags: Vec<String>,
 }
 
 /// Convert a markdown string to an org-mode formatted string.

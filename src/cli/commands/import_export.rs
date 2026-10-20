@@ -49,6 +49,10 @@ pub struct ExportArgs {
     /// Filter by journal category
     #[arg(long)]
     pub journal: Option<String>,
+
+    /// Only entries with this tag (repeat to require several tags)
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Args)]
@@ -70,7 +74,7 @@ pub struct ImportArgs {
 }
 
 pub fn export(journal: &Journal, config: &Config, args: ExportArgs) -> Result<()> {
-    let filters = create_export_filters(args.date, args.since, args.until, args.journal);
+    let filters = create_export_filters(args.date, args.since, args.until, args.journal, args.tags);
     handle_export_command(
         journal,
         args.output,
@@ -122,13 +126,20 @@ fn create_export_filters(
     since: Option<String>,
     until: Option<String>,
     journal_filter: Option<String>,
+    tags: Vec<String>,
 ) -> Option<ExportFilters> {
-    if date.is_some() || since.is_some() || until.is_some() || journal_filter.is_some() {
+    if date.is_some()
+        || since.is_some()
+        || until.is_some()
+        || journal_filter.is_some()
+        || !tags.is_empty()
+    {
         Some(ExportFilters {
             date,
             since,
             until,
             journal: journal_filter,
+            tags,
         })
     } else {
         None

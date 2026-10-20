@@ -1,5 +1,6 @@
-use super::list::print_entry;
+use super::list::{format_tags, print_entry};
 use crate::audio::{get_audio_directory, get_audio_full_path};
+use crate::cli::dateparser::parse_tags;
 use crate::cli::frontmatter::{format_entry_with_frontmatter, parse_frontmatter};
 use crate::config::Config;
 use crate::journal::{Journal, NewEntry};
@@ -16,14 +17,31 @@ pub fn create_entry(
     config: &Config,
     content: Vec<String>,
     journal_category: Option<&str>,
+    tags: &[String],
 ) -> Result<()> {
+    let tags = parse_tags(tags)?;
     if content.is_empty() {
-        return new_entry(journal, journal_category, config);
+        return new_entry(journal, journal_category, &tags, config);
     }
 
     let entry_content = content.join(" ");
-    let id = journal.create_entry(NewEntry::new(&entry_content).journal(journal_category))?;
+    let id = journal.create_entry(
+        NewEntry::new(&entry_content)
+            .journal(journal_category)
+            .tags(&tags),
+    )?;
     println!("{}", format!("Entry {} added successfully", id).green());
+    print_entry_tags(journal, id)?;
+    Ok(())
+}
+
+/// Tell the user which tags an entry ended up with (inline `#tags` included).
+fn print_entry_tags(journal: &Journal, id: i64) -> Result<()> {
+    if let Some(entry) = journal.get_entry(id)?
+        && !entry.tags.is_empty()
+    {
+        println!("{}: {}", "Tags".cyan(), format_tags(&entry.tags));
+    }
     Ok(())
 }
 
@@ -194,7 +212,12 @@ fn parse_entry_body(body: &str) -> (Option<String>, String) {
     }
 }
 
-fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config) -> Result<()> {
+fn new_entry(
+    journal: &Journal,
+    journal_category: Option<&str>,
+    tags: &[String],
+    config: &Config,
+) -> Result<()> {
     // Create a temporary file for the new entry
     let temp_dir = env::temp_dir();
     let temp_file = temp_dir.join("captains-log-new.md");
@@ -228,9 +251,11 @@ fn new_entry(journal: &Journal, journal_category: Option<&str>, config: &Config)
     let id = journal.create_entry(
         NewEntry::new(&content)
             .title(title.as_deref())
-            .journal(journal_category),
+            .journal(journal_category)
+            .tags(tags),
     )?;
     println!("{}", format!("Entry {} created successfully", id).green());
+    print_entry_tags(journal, id)?;
 
     // Clean up temp file
     let _ = fs::remove_file(&temp_file);
@@ -253,9 +278,14 @@ pub fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
         entry.content.clone()
     };
 
-    // Write current content with YAML frontmatter to temp file
-    let content_with_frontmatter =
-        format_entry_with_frontmatter(&entry.journal, entry.timestamp, &body_content)?;
+    // Write current content with YAML frontmatter to temp file. Tags written
+    // as #tag in the text are not repeated in the frontmatter.
+    let content_with_frontmatter = format_entry_with_frontmatter(
+        &entry.journal,
+        entry.timestamp,
+        &entry.extra_tags(),
+        &body_content,
+    )?;
     fs::write(&temp_file, content_with_frontmatter)?;
 
     let status = run_editor(config, &temp_file)?;
@@ -272,6 +302,12 @@ pub fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
         "Failed to parse entry. Make sure the YAML frontmatter is properly formatted with '---' delimiters",
     )?;
     let (title, content) = parse_entry_body(&body);
+    let extra_tags = parse_tags(&metadata.tags).with_context(|| {
+        format!(
+            "Invalid tags in the frontmatter (your edits are kept in {})",
+            temp_file.display()
+        )
+    })?;
 
     // Update the entry with metadata
     if journal.update_entry_with_metadata(
@@ -280,8 +316,10 @@ pub fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
         &content,
         &metadata.journal,
         metadata.timestamp,
+        &extra_tags,
     )? {
         println!("{}", format!("Entry {} updated successfully", id).green());
+        print_entry_tags(journal, id)?;
     } else {
         println!("{}", format!("Failed to update entry {}", id).red());
     }

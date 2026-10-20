@@ -1,4 +1,4 @@
-use crate::journal::EntryFilters;
+use crate::journal::{EntryFilters, normalize_tag};
 use crate::time::{days_in_month, today};
 use anyhow::Result;
 use chrono::{Datelike, Duration, NaiveDate};
@@ -138,6 +138,7 @@ pub fn parse_entry_filters(
     since: Option<&str>,
     until: Option<&str>,
     journal: Option<&str>,
+    tags: &[String],
     tz: Option<Tz>,
 ) -> Result<EntryFilters> {
     Ok(EntryFilters {
@@ -145,7 +146,21 @@ pub fn parse_entry_filters(
         since: parse_optional_date(since, "since date", tz)?,
         until: parse_optional_date(until, "until date", tz)?,
         journal: journal.map(str::to_string),
+        tags: parse_tags(tags)?,
     })
+}
+
+/// Validate and normalize tag names given on the command line.
+pub fn parse_tags(tags: &[String]) -> Result<Vec<String>> {
+    tags.iter()
+        .map(|raw| {
+            normalize_tag(raw).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Invalid tag '{raw}': tags start with a letter and contain only letters, digits, '-' and '_'"
+                )
+            })
+        })
+        .collect()
 }
 
 fn parse_optional_date(

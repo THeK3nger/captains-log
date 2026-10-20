@@ -15,6 +15,7 @@ use commands::import_export::{ExportArgs, ImportArgs, export, import};
 use commands::list::{
     ListArgs, SearchArgs, list_entries, search_entries, show_calendar, show_entry,
 };
+use commands::tags::{TagsAction, handle_tags_command};
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -64,8 +65,18 @@ pub enum Commands {
         #[arg(long)]
         journal: Option<String>,
 
+        /// Tag for the new entry (repeatable). #tags in the text are picked up too
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+
         /// Quick entry content (if provided, creates entry directly without opening editor)
         content: Vec<String>,
+    },
+
+    /// List and manage tags
+    Tags {
+        #[command(subcommand)]
+        action: Option<TagsAction>,
     },
 
     /// Display calendar view of entries
@@ -100,6 +111,10 @@ pub enum Commands {
         /// Journal category for the new entry
         #[arg(long)]
         journal: Option<String>,
+
+        /// Tag for the new entry (repeatable). #tags in the transcription are picked up too
+        #[arg(long = "tag")]
+        tags: Vec<String>,
 
         /// Skip transcription (audio only)
         #[arg(long)]
@@ -146,8 +161,10 @@ pub fn handle_command(
         Commands::Edit { id } => edit_entry(journal, id, config),
         Commands::New {
             journal: new_journal,
+            tags,
             content,
-        } => create_entry(journal, config, content, new_journal.as_deref()),
+        } => create_entry(journal, config, content, new_journal.as_deref(), &tags),
+        Commands::Tags { action } => handle_tags_command(journal, action),
         Commands::Calendar {
             year,
             month,
@@ -158,6 +175,7 @@ pub fn handle_command(
         Commands::Import(args) => import(journal, config, args),
         Commands::Record {
             journal: record_journal,
+            tags,
             no_transcribe,
             max_duration,
         } => handle_record_command(
@@ -165,6 +183,7 @@ pub fn handle_command(
             config,
             db_path,
             record_journal,
+            &tags,
             no_transcribe,
             max_duration,
         ),

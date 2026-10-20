@@ -2,7 +2,7 @@
 /// This is a very hardcoded implementation tailored for CaptainLog's needs.
 /// I don't want to introduce too much complexity here.
 ///
-/// So, for now, this just handles the `journal` and `timestamp` fields.
+/// So, for now, this just handles the `journal`, `timestamp` and `tags` fields.
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,9 @@ const FRONTMATTER_DELIMITER: &str = "---";
 pub struct EntryMetadata {
     pub journal: String,
     pub timestamp: DateTime<Utc>,
+    /// Tags not already written as `#tag` in the text.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Parse content with YAML frontmatter
@@ -58,11 +61,13 @@ pub fn parse_frontmatter(content: &str) -> Result<(EntryMetadata, String)> {
 pub fn format_entry_with_frontmatter(
     journal: &str,
     timestamp: DateTime<Utc>,
+    tags: &[String],
     content: &str,
 ) -> Result<String> {
     let metadata = EntryMetadata {
         journal: journal.to_string(),
         timestamp,
+        tags: tags.to_vec(),
     };
 
     let yaml = serde_yaml_ng::to_string(&metadata)
@@ -127,13 +132,33 @@ Content without closing delimiter"#;
         let timestamp = Utc.with_ymd_and_hms(2025, 10, 6, 14, 30, 0).unwrap();
         let content = "# Title\n\nContent";
 
-        let result = format_entry_with_frontmatter("Personal", timestamp, content);
+        let result = format_entry_with_frontmatter("Personal", timestamp, &[], content);
         assert!(result.is_ok());
 
         let formatted = result.unwrap();
         assert!(formatted.starts_with("---"));
         assert!(formatted.contains("journal: Personal"));
         assert!(formatted.contains("timestamp:"));
+        assert!(formatted.contains("tags: []"));
         assert!(formatted.contains("# Title"));
+    }
+
+    #[test]
+    fn test_tags_default_to_empty_when_missing() {
+        let content = "---\njournal: Work\ntimestamp: 2025-10-06T14:30:00Z\n---\nBody";
+        let (metadata, _) = parse_frontmatter(content).unwrap();
+        assert!(metadata.tags.is_empty());
+    }
+
+    #[test]
+    fn test_tags_round_trip() {
+        let timestamp = Utc.with_ymd_and_hms(2025, 10, 6, 14, 30, 0).unwrap();
+        let tags = vec!["pricing".to_string(), "q4".to_string()];
+
+        let formatted = format_entry_with_frontmatter("Work", timestamp, &tags, "Body").unwrap();
+        let (metadata, remaining) = parse_frontmatter(&formatted).unwrap();
+
+        assert_eq!(metadata.tags, tags);
+        assert_eq!(remaining, "Body");
     }
 }

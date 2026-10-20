@@ -30,6 +30,10 @@ pub struct ListArgs {
     #[arg(long)]
     pub journal: Option<String>,
 
+    /// Only entries with this tag (repeat to require several tags)
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
+
     /// Maximum number of entries to show (defaults to display.entries_per_page or 20)
     #[arg(short, long)]
     pub limit: Option<usize>,
@@ -52,6 +56,10 @@ pub struct SearchArgs {
     #[arg(long)]
     pub journal: Option<String>,
 
+    /// Only entries with this tag (repeat to require several tags)
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
+
     /// Only entries since date (YYYY-MM-DD or relative, e.g. "last week")
     #[arg(long)]
     pub since: Option<String>,
@@ -71,6 +79,7 @@ pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Resul
         since,
         until,
         journal: list_journal,
+        tags,
         limit,
         all,
         oldest_first,
@@ -86,6 +95,7 @@ pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Resul
         since.as_deref(),
         until.as_deref(),
         journal_filter,
+        &tags,
         config.get_timezone(),
     )?;
 
@@ -161,6 +171,7 @@ pub fn search_entries(journal: &Journal, config: &Config, args: SearchArgs) -> R
     let SearchArgs {
         query,
         journal: journal_filter,
+        tags,
         since,
         until,
         limit,
@@ -175,6 +186,7 @@ pub fn search_entries(journal: &Journal, config: &Config, args: SearchArgs) -> R
         since.as_deref(),
         until.as_deref(),
         journal_filter.as_deref(),
+        &tags,
         config.get_timezone(),
     )?;
     let mut entries = journal.search_entries(&query, &filters)?;
@@ -251,6 +263,14 @@ pub fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) {
     );
     if let Some(title) = &entry.title {
         println!("{}: {}", "Title".cyan().bold(), title.green().bold());
+    }
+
+    if !entry.tags.is_empty() {
+        println!(
+            "{}: {}",
+            "Tags".cyan().bold(),
+            format_tags(&entry.tags).blue()
+        );
     }
 
     // Display audio info if available
@@ -377,6 +397,12 @@ fn format_entry_summary(
 
     let journal = format!("[{}]", entry.journal).magenta().bold();
 
+    let tags = if entry.tags.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", format_tags(&entry.tags).bright_black())
+    };
+
     // Add audio indicator if entry has audio
     let audio_indicator = if entry.audio_path.is_some() {
         " 🎤"
@@ -386,7 +412,7 @@ fn format_entry_summary(
 
     if let Some(title) = &entry.title {
         format!(
-            "{} {} {} - {} - {}{}",
+            "{} {} {} - {} - {}{}{}",
             id,
             date,
             journal,
@@ -395,14 +421,23 @@ fn format_entry_summary(
                 None => title.green().bold().to_string(),
             },
             content_preview,
+            tags,
             audio_indicator
         )
     } else {
         format!(
-            "{} {} {} - {}{}",
-            id, date, journal, content_preview, audio_indicator
+            "{} {} {} - {}{}{}",
+            id, date, journal, content_preview, tags, audio_indicator
         )
     }
+}
+
+/// `#a #b #c`
+pub fn format_tags(tags: &[String]) -> String {
+    tags.iter()
+        .map(|tag| format!("#{tag}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn format_stardate(stardate: f64) -> String {
