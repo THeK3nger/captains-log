@@ -2,7 +2,7 @@
 //! interpolated value by default; only `PreEscaped` content is emitted raw.
 
 use super::ListQuery;
-use crate::journal::Entry;
+use crate::journal::{Entry, TagCount};
 use crate::time::to_local;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use pulldown_cmark::{Options, Parser as MdParser, html as md_html};
@@ -29,14 +29,17 @@ fn url_encode(value: &str) -> String {
     })
 }
 
-/// Query string for URLs that keep the active journal and search filters.
-pub fn list_query(journal: Option<&str>, search: Option<&str>) -> String {
+/// Query string for URLs that keep the active journal, search and tag filters.
+pub fn list_query(journal: Option<&str>, search: Option<&str>, tag: Option<&str>) -> String {
     let mut params = Vec::new();
     if let Some(journal) = journal {
         params.push(format!("journal={}", url_encode(journal)));
     }
     if let Some(search) = search {
         params.push(format!("q={}", url_encode(search)));
+    }
+    if let Some(tag) = tag {
+        params.push(format!("tag={}", url_encode(tag)));
     }
     if params.is_empty() {
         String::new()
@@ -127,6 +130,11 @@ pub fn entry_list(entries: &[Entry], active_id: Option<i64>, filter: &ListQuery)
                     }
                 }
                 div.ei-preview { (preview) }
+                @if !entry.tags.is_empty() {
+                    div.ei-tags {
+                        @for tag in &entry.tags { span.tag-chip { "#" (tag) } }
+                    }
+                }
             }
         }
     }
@@ -156,6 +164,14 @@ pub fn entry_detail(entry: &Entry, filter: &ListQuery) -> Markup {
                 }
                 (divider())
             }
+            @if !entry.tags.is_empty() {
+                div.ed-tags {
+                    @for tag in &entry.tags {
+                        a.tag-chip href=(format!("/{}", list_query(filter.journal(), filter.search(), Some(tag))))
+                        { "#" (tag) }
+                    }
+                }
+            }
             @if let Some(path) = &entry.audio_path {
                 div.ed-audio { "🎤 " (path) }
             }
@@ -164,8 +180,25 @@ pub fn entry_detail(entry: &Entry, filter: &ListQuery) -> Markup {
     }
 }
 
+/// What the user submitted, shown again together with `error` when a save
+/// fails, so the text they typed is never lost.
+pub struct FormDraft<'a> {
+    pub title: &'a str,
+    pub journal: &'a str,
+    pub tags: &'a str,
+    pub timestamp: Option<&'a str>,
+    pub content: &'a str,
+    pub error: &'a str,
+}
+
 /// The create form (`entry` is `None`) or the edit form for an existing entry.
-pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: &ListQuery) -> Markup {
+/// With a `draft`, its values replace the entry's and its error is shown above the fields.
+pub fn entry_form(
+    entry: Option<&Entry>,
+    journals: &[String],
+    filter: &ListQuery,
+    draft: Option<&FormDraft>,
+) -> Markup {
     let query = filter.url_query();
     let (action, heading, cancel_target) = match entry {
         Some(e) => (
@@ -180,11 +213,33 @@ pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: &ListQuery
         e.journal.as_str()
     });
     let content = entry.map_or("", |e| e.content.as_str());
+    // Tags written as #tag in the content are picked up on their own; the field
+    // holds the others. A new entry starts with the tag being filtered on.
+    let mut tags = match entry {
+        Some(e) => e.extra_tags().join(", "),
+        None => filter.tag().unwrap_or_default(),
+    };
+    let (mut title, mut journal, mut content) = (title, journal, content);
+    let mut timestamp = entry.map(|e| {
+        to_local(&e.timestamp, None)
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string()
+    });
+    if let Some(d) = draft {
+        (title, journal, content) = (d.title, d.journal, d.content);
+        tags = d.tags.to_string();
+        if let Some(value) = d.timestamp {
+            timestamp = Some(value.to_string());
+        }
+    }
 
     html! {
         div.entry-form data-entry-id=[entry.map(|e| e.id)] data-detail-view="form" {
             (back_to_logs(filter))
             div.form-title-bar { h2.form-heading { (heading) } (divider()) }
+            @if let Some(d) = draft {
+                div.load-error.form-error role="alert" { (d.error) }
+            }
             form action=(format!("{action}{query}")) method="post"
                 hx-post=(format!("{action}{query}")) hx-target="#entry-detail" hx-swap="innerHTML"
                 hx-disabled-elt="#entry-detail .btn-save" {
@@ -201,11 +256,16 @@ pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: &ListQuery
                         @for name in journals { option value=(name); }
                     }
                 }
-                @if let Some(e) = entry {
+                div.form-field {
+                    label.form-label for="entry-tags" { "TAGS (OPTIONAL)" }
+                    input.form-input #entry-tags type="text" name="tags" value=(tags)
+                        placeholder="work, planning — #tags in the content count too" autocomplete="off";
+                }
+                @if let Some(timestamp) = &timestamp {
                     div.form-field {
                         label.form-label for="entry-timestamp" { "DATE" }
                         input.form-input #entry-timestamp type="datetime-local" name="timestamp" step="1"
-                            value=(to_local(&e.timestamp, None).format("%Y-%m-%dT%H:%M:%S"));
+                            value=(timestamp);
                     }
                 }
                 div.form-field {
@@ -225,17 +285,20 @@ pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: &ListQuery
 }
 
 /// The full page: sidebar, entry list and `detail` in the main pane.
-/// `journals` fills the sidebar; `errors` are shown above the entry list; `filter` scopes the entry list and navigation.
+/// `journals` fills the sidebar and `tags` the tag filter; `errors` are shown above the entry list; `filter` scopes the entry list and navigation.
 pub fn page(
     entries: &[Entry],
     active_id: Option<i64>,
     detail: Markup,
     journals: &[String],
+    tags: &[TagCount],
     errors: &[&str],
     filter: &ListQuery,
 ) -> Markup {
     let journal = filter.journal();
     let search = filter.search();
+    let tag = filter.tag();
+    let tag = tag.as_deref();
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -268,13 +331,13 @@ pub fn page(
                         { "NEW ENTRY" }
                         div.sb-links {
                             a class=(if journal.is_none() { "sb-btn c-tan active" } else { "sb-btn c-tan" })
-                                href=(format!("/{}", list_query(None, search))) aria-current=[journal.is_none().then_some("page")]
+                                href=(format!("/{}", list_query(None, search, tag))) aria-current=[journal.is_none().then_some("page")]
                             { "ALL ENTRIES" }
                             @for (i, name) in journals.iter().enumerate() {
                                 @let color = JOURNAL_COLORS[i % JOURNAL_COLORS.len()];
                                 @let active = journal == Some(name.as_str());
                                 a class=(format!("sb-btn c-{color}{}", if active { " active" } else { "" }))
-                                    href=(format!("/{}", list_query(Some(name), search)))
+                                    href=(format!("/{}", list_query(Some(name), search, tag)))
                                     aria-current=[active.then_some("page")] title=(name)
                                 { span.sb-label { (name) } }
                             }
@@ -288,13 +351,32 @@ pub fn page(
                             form.list-search action="/" method="get" role="search" {
                                 label.form-label for="log-search" { "SEARCH LOGS" }
                                 @if let Some(journal) = journal { input type="hidden" name="journal" value=(journal); }
+                                @if let Some(tag) = tag { input type="hidden" name="tag" value=(tag); }
                                 div.search-controls {
                                     input.form-input #log-search type="search" name="q" value=(search.unwrap_or(""))
                                         placeholder="Title or content…" autocomplete="off";
                                     button.search-submit type="submit" { "SEARCH" }
                                 }
                                 @if search.is_some() {
-                                    a.search-clear href=(format!("/{}", list_query(journal, None))) { "CLEAR SEARCH" }
+                                    a.search-clear href=(format!("/{}", list_query(journal, None, tag))) { "CLEAR SEARCH" }
+                                }
+                            }
+                            @if !tags.is_empty() {
+                                details.tag-filter open[tag.is_some()] {
+                                    summary.form-label {
+                                        "TAGS"
+                                        @if let Some(tag) = tag { " · #" (tag) }
+                                    }
+                                    div.tag-cloud {
+                                        @for t in tags {
+                                            @let active = tag == Some(t.name.as_str());
+                                            // Clicking the active tag turns the filter off
+                                            @let target = list_query(journal, search, (!active).then_some(t.name.as_str()));
+                                            a.tag-chip.active[active] href=(format!("/{target}"))
+                                                aria-current=[active.then_some("true")]
+                                            { "#" (t.name) " " span.tag-count { (t.count) } }
+                                        }
+                                    }
                                 }
                             }
                             @for error in errors {
@@ -317,6 +399,7 @@ pub fn page(
                                 (entries.len())
                                 @if search.is_some() { " MATCHING ENTRIES" } @else { " ENTRIES ON RECORD" }
                                 @if let Some(name) = journal { " · " (name) }
+                                @if let Some(tag) = tag { " · #" (tag) }
                             }
                             span.keyboard-help title="J/K: next/previous log · N: new entry · Esc: cancel editing" { "J/K · N · ESC" }
                         }

@@ -72,6 +72,11 @@ impl<'a> Exporter<'a> {
                 } else {
                     md_content.push_str(&format!("### {}\n\n", date_str));
                 }
+                // Inline #tags are already part of the content
+                let extra_tags = entry.extra_tags();
+                if !extra_tags.is_empty() {
+                    md_content.push_str(&format!("Tags: {}\n\n", format_hashtags(&extra_tags)));
+                }
                 md_content.push_str(&format!("{}\n\n", entry.content));
             }
         }
@@ -111,11 +116,7 @@ impl<'a> Exporter<'a> {
                 let time = to_local(&entry.timestamp, self.timezone)
                     .format("%H:%M")
                     .to_string();
-                if let Some(title) = &entry.title {
-                    org_content.push_str(&format!("** {} {}\n", time, title));
-                } else {
-                    org_content.push_str(&format!("** {} \n", time));
-                }
+                org_content.push_str(&org_headline(&time, entry.title.as_deref(), &entry.tags));
                 org_content.push_str(&convert_markdown_to_org(&entry.content, 1));
             }
         }
@@ -188,6 +189,31 @@ pub struct ExportFilters {
     pub until: Option<String>,
     pub journal: Option<String>,
     pub tags: Vec<String>,
+}
+
+fn format_hashtags(tags: &[String]) -> String {
+    tags.iter()
+        .map(|tag| format!("#{tag}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Org entry headline, with the tags as native org tags (`:a:b:`). Org tags
+/// can't contain `-`, so it becomes `_`.
+fn org_headline(time: &str, title: Option<&str>, tags: &[String]) -> String {
+    let mut headline = match title {
+        Some(title) => format!("** {time} {title}"),
+        None => format!("** {time} "),
+    };
+    if !tags.is_empty() {
+        if title.is_some() {
+            headline.push(' ');
+        }
+        let tags: Vec<String> = tags.iter().map(|tag| tag.replace('-', "_")).collect();
+        headline.push_str(&format!(":{}:", tags.join(":")));
+    }
+    headline.push('\n');
+    headline
 }
 
 /// Convert a markdown string to an org-mode formatted string.
@@ -312,5 +338,27 @@ mod tests {
         let md = "**Bold**";
         let org = convert_markdown_to_org(md, 0);
         assert_eq!(org.trim(), "*Bold*");
+    }
+
+    #[test]
+    fn org_headline_without_tags_is_unchanged() {
+        assert_eq!(
+            org_headline("10:30", Some("Title"), &[]),
+            "** 10:30 Title\n"
+        );
+        assert_eq!(org_headline("10:30", None, &[]), "** 10:30 \n");
+    }
+
+    #[test]
+    fn org_headline_uses_native_tags() {
+        let tags = vec!["ship-it".to_string(), "work".to_string()];
+        assert_eq!(
+            org_headline("10:30", Some("Title"), &tags),
+            "** 10:30 Title :ship_it:work:\n"
+        );
+        assert_eq!(
+            org_headline("10:30", None, &tags),
+            "** 10:30 :ship_it:work:\n"
+        );
     }
 }

@@ -207,6 +207,7 @@ html, body {
   border-right: 1px solid #1a1a1a;
 }
 .load-error { padding: 10px 16px; border-bottom: 3px solid var(--red); color: var(--red); font-weight: 600; letter-spacing: 0.08em; }
+.form-error { margin-bottom: 16px; border: 0; border-left: 5px solid var(--red); background: rgba(204, 102, 102, 0.12); }
 .entry-list { flex: 1; min-height: 0; overflow-y: auto; }
 .list-search { padding: 12px 16px; border-bottom: 5px solid var(--blue); }
 .search-controls { display: flex; gap: var(--gap); }
@@ -222,6 +223,29 @@ html, body {
   cursor: pointer;
 }
 .search-submit:hover { background: var(--salmon); }
+.tag-filter { padding: 8px 16px; border-bottom: 5px solid var(--blue); }
+.tag-filter summary { cursor: pointer; margin-bottom: 0; }
+.tag-filter[open] summary { margin-bottom: 8px; }
+.tag-cloud, .ei-tags, .ed-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-cloud { max-height: 120px; overflow-y: auto; }
+.ei-tags { margin-top: 6px; }
+.ed-tags { margin: 0 0 14px; }
+.tag-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--purple);
+  color: #000;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+a.tag-chip:hover, a.tag-chip:focus-visible { background: var(--tan); }
+a.tag-chip.active { background: var(--orange); }
+.tag-count { opacity: 0.6; }
+.entry-item:hover .tag-chip, .entry-item.active .tag-chip { background: var(--blue); }
+
 .search-clear { display: inline-block; margin-top: 8px; font-size: 12px; color: var(--periwinkle); }
 .mobile-back { display: none; }
 

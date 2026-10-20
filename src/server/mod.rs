@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 mod templates;
 
 use crate::database::Database;
-use crate::journal::{Entry, EntryFilters, Journal, NewEntry};
+use crate::journal::{Entry, EntryFilters, Journal, NewEntry, TagCount, normalize_tag};
 use crate::time::localize;
 
 #[derive(Deserialize)]
@@ -22,6 +22,8 @@ struct EntryForm {
     content: String,
     journal: String,
     timestamp: Option<String>,
+    /// Extra tags, separated by commas or spaces. `None` (field absent) keeps the entry's current ones.
+    tags: Option<String>,
 }
 
 impl EntryForm {
@@ -35,11 +37,64 @@ impl EntryForm {
     }
 }
 
-/// Journal and literal title/content search filters for page URLs.
+/// Tag names from the form's tags field. `Err` holds the first invalid one.
+fn parse_form_tags(raw: &str) -> Result<Vec<String>, String> {
+    raw.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|tag| !tag.is_empty())
+        .map(|tag| normalize_tag(tag).ok_or_else(|| tag.to_string()))
+        .collect()
+}
+
+fn invalid_tag_message(tag: &str) -> String {
+    format!(
+        "INVALID TAG: {} — TAGS START WITH A LETTER AND USE ONLY LETTERS, DIGITS, - AND _",
+        tag.to_uppercase()
+    )
+}
+
+/// Show the form again with everything the user submitted and `message` above it,
+/// so a failed save never costs them their text. `id` is the entry being edited.
+fn form_error_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: &ListQuery,
+    id: Option<i64>,
+    data: &EntryForm,
+    message: &str,
+) -> Response {
+    let (entry, journals) = {
+        let j = state.journal.lock().expect("journal lock poisoned");
+        (id.map(|id| j.get_entry(id)), j.list_journals())
+    };
+    let detail = match entry {
+        Some(Ok(None)) => templates::message_panel("ENTRY NOT FOUND", query),
+        Some(Err(err)) => {
+            eprintln!("unable to load entry for editing: {err:#}");
+            templates::message_panel("UNABLE TO LOAD ENTRY", query)
+        }
+        entry => {
+            let entry = entry.and_then(Result::ok).flatten();
+            let journals = journals.unwrap_or_default();
+            let draft = templates::FormDraft {
+                title: &data.title,
+                journal: &data.journal,
+                tags: data.tags.as_deref().unwrap_or_default(),
+                timestamp: data.timestamp.as_deref(),
+                content: &data.content,
+                error: message,
+            };
+            templates::entry_form(entry.as_ref(), &journals, query, Some(&draft))
+        }
+    };
+    page_response(state, headers, query, id, detail).into_response()
+}
+
+/// Journal, tag and literal title/content search filters for page URLs.
 #[derive(Deserialize, Default)]
 struct ListQuery {
     journal: Option<String>,
     q: Option<String>,
+    tag: Option<String>,
 }
 
 impl ListQuery {
@@ -51,8 +106,13 @@ impl ListQuery {
         self.q.as_deref().map(str::trim).filter(|q| !q.is_empty())
     }
 
+    /// The tag filter, normalized (`None` if absent or not a valid tag).
+    fn tag(&self) -> Option<String> {
+        self.tag.as_deref().and_then(normalize_tag)
+    }
+
     fn url_query(&self) -> String {
-        templates::list_query(self.journal(), self.search())
+        templates::list_query(self.journal(), self.search(), self.tag().as_deref())
     }
 }
 
@@ -62,11 +122,12 @@ fn matches_search(title: Option<&str>, content: &str, search: &str) -> bool {
         || content.to_lowercase().contains(&search)
 }
 
-/// Everything the page chrome needs: the (filtered) entry list and all journal names,
-/// plus a message for each load that failed.
+/// Everything the page chrome needs: the (filtered) entry list, all journal names
+/// and tags, plus a message for each load that failed.
 struct SidebarData {
     entries: Vec<Entry>,
     journals: Vec<String>,
+    tags: Vec<TagCount>,
     errors: Vec<&'static str>,
 }
 
@@ -86,21 +147,21 @@ fn load_or_report<T: Default>(
 fn sidebar_data(state: &AppState, query: &ListQuery) -> SidebarData {
     let j = state.journal.lock().expect("journal lock poisoned");
     let mut errors = Vec::new();
-    let entries = match query.journal() {
-        Some(name) => j.list_entries_filtered(&EntryFilters {
-            journal: Some(name.to_string()),
-            ..EntryFilters::default()
-        }),
-        None => j.list_entries(),
-    };
+    let entries = j.list_entries_filtered(&EntryFilters {
+        journal: query.journal().map(str::to_string),
+        tags: query.tag().into_iter().collect(),
+        ..EntryFilters::default()
+    });
     let mut entries = load_or_report(entries, "UNABLE TO LOAD ENTRIES", &mut errors);
     if let Some(search) = query.search() {
         entries.retain(|entry| matches_search(entry.title.as_deref(), &entry.content, search));
     }
     let journals = load_or_report(j.list_journals(), "UNABLE TO LOAD JOURNALS", &mut errors);
+    let tags = load_or_report(j.list_tags(), "UNABLE TO LOAD TAGS", &mut errors);
     SidebarData {
         entries,
         journals,
+        tags,
         errors,
     }
 }
@@ -169,6 +230,7 @@ fn page_response(
             active_id,
             detail,
             &data.journals,
+            &data.tags,
             &data.errors,
             query,
         )
@@ -198,14 +260,35 @@ async fn entry_handler(
     page_response(&state, &headers, &query, Some(id), detail)
 }
 
-fn save_redirect(headers: &HeaderMap, id: i64, filter: &ListQuery, data: &EntryForm) -> Response {
+/// Tags of a just-saved entry (empty if they can't be loaded).
+fn saved_tags(journal: &Journal, id: i64) -> Vec<String> {
+    journal
+        .get_entry(id)
+        .ok()
+        .flatten()
+        .map(|entry| entry.tags)
+        .unwrap_or_default()
+}
+
+fn save_redirect(
+    headers: &HeaderMap,
+    id: i64,
+    filter: &ListQuery,
+    data: &EntryForm,
+    saved_tags: &[String],
+) -> Response {
     let (title, journal) = data.normalized_title_and_journal();
-    // Keep a search only if the saved entry still matches it.
+    // Keep a search only if the saved entry still matches it, and a tag
+    // filter only if the entry still has the tag.
     let query = templates::list_query(
         filter.journal().map(|_| journal),
         filter
             .search()
             .filter(|search| matches_search(title, &data.content, search)),
+        filter
+            .tag()
+            .as_deref()
+            .filter(|tag| saved_tags.iter().any(|t| t == tag)),
     );
     let url = format!("/entry/{id}{query}");
     if !is_partial_request(headers) {
@@ -228,7 +311,7 @@ async fn new_form_handler(
         j.list_journals()
     };
     let detail = match journals {
-        Ok(journals) => templates::entry_form(None, &journals, &query),
+        Ok(journals) => templates::entry_form(None, &journals, &query, None),
         Err(err) => {
             eprintln!("unable to load journals: {err:#}");
             templates::message_panel("UNABLE TO LOAD JOURNALS", &query)
@@ -244,20 +327,31 @@ async fn create_handler(
     Form(data): Form<EntryForm>,
 ) -> Response {
     let (title, journal) = data.normalized_title_and_journal();
+    let tags = match parse_form_tags(data.tags.as_deref().unwrap_or_default()) {
+        Ok(tags) => tags,
+        Err(tag) => {
+            let message = invalid_tag_message(&tag);
+            return form_error_response(&state, &headers, &query, None, &data, &message);
+        }
+    };
 
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
         j.create_entry(
             NewEntry::new(data.content.trim())
                 .title(title)
-                .journal(Some(journal)),
+                .journal(Some(journal))
+                .tags(&tags),
         )
+        .map(|id| (id, saved_tags(&j, id)))
     };
 
     match result {
-        Ok(id) => save_redirect(&headers, id, &query, &data),
-        Err(_) => Html(templates::message_panel("ERROR SAVING ENTRY", &query).into_string())
-            .into_response(),
+        Ok((id, tags)) => save_redirect(&headers, id, &query, &data, &tags),
+        Err(err) => {
+            eprintln!("unable to save entry: {err:#}");
+            form_error_response(&state, &headers, &query, None, &data, "ERROR SAVING ENTRY")
+        }
     }
 }
 
@@ -278,7 +372,7 @@ async fn edit_form_handler(
         Some(id),
         match (result, journals) {
             (Ok(Some(entry)), Ok(journals)) => {
-                templates::entry_form(Some(&entry), &journals, &query)
+                templates::entry_form(Some(&entry), &journals, &query, None)
             }
             (Ok(None), _) => templates::message_panel("ENTRY NOT FOUND", &query),
             (Err(err), _) | (_, Err(err)) => {
@@ -297,11 +391,19 @@ async fn update_handler(
     Form(data): Form<EntryForm>,
 ) -> Response {
     let (title, journal) = data.normalized_title_and_journal();
+    let form_tags = match data.tags.as_deref().map(parse_form_tags).transpose() {
+        Ok(tags) => tags,
+        Err(tag) => {
+            let message = invalid_tag_message(&tag);
+            return form_error_response(&state, &headers, &query, Some(id), &data, &message);
+        }
+    };
 
     let result = {
         let j = state.journal.lock().expect("journal lock poisoned");
         match j.get_entry(id) {
             Ok(Some(entry)) => {
+                let extra_tags = form_tags.unwrap_or_else(|| entry.extra_tags());
                 let timestamp = match data.timestamp.as_deref().map(str::trim) {
                     Some("") | None => Ok(entry.timestamp),
                     Some(value) => parse_local_form_timestamp(value),
@@ -314,7 +416,7 @@ async fn update_handler(
                         data.content.trim(),
                         journal,
                         timestamp,
-                        &entry.extra_tags(),
+                        &extra_tags,
                     )
                 })
             }
@@ -324,12 +426,27 @@ async fn update_handler(
     };
 
     match result {
-        Ok(true) => save_redirect(&headers, id, &query, &data),
+        Ok(true) => {
+            let tags = {
+                let j = state.journal.lock().expect("journal lock poisoned");
+                saved_tags(&j, id)
+            };
+            save_redirect(&headers, id, &query, &data, &tags)
+        }
         Ok(false) => {
             Html(templates::message_panel("ENTRY NOT FOUND", &query).into_string()).into_response()
         }
-        Err(_) => Html(templates::message_panel("ERROR SAVING ENTRY", &query).into_string())
-            .into_response(),
+        Err(err) => {
+            eprintln!("unable to save entry {id}: {err:#}");
+            form_error_response(
+                &state,
+                &headers,
+                &query,
+                Some(id),
+                &data,
+                "ERROR SAVING ENTRY",
+            )
+        }
     }
 }
 
@@ -420,6 +537,7 @@ mod tests {
         let filter = ListQuery {
             journal: Some("Ship Operations".into()),
             q: Some(" NAVIGATION ".into()),
+            ..ListQuery::default()
         };
         let entries = sidebar_data(&state, &filter).entries;
         let mut ids: Vec<_> = entries.iter().map(|entry| entry.id).collect();
@@ -436,6 +554,7 @@ mod tests {
         let literal = ListQuery {
             journal: Some("Ship Operations".into()),
             q: Some("%_".into()),
+            ..ListQuery::default()
         };
         let entries = sidebar_data(&state, &literal).entries;
         assert_eq!(entries.len(), 1);
@@ -460,6 +579,7 @@ mod tests {
             Query(ListQuery {
                 journal: Some("Ship Operations".into()),
                 q: Some("navigation".into()),
+                ..ListQuery::default()
             })
         };
         let result = create_handler(
@@ -471,6 +591,7 @@ mod tests {
                 content: "Online".into(),
                 journal: "Ship Operations".into(),
                 timestamp: None,
+                tags: None,
             }),
         )
         .await;
@@ -488,6 +609,7 @@ mod tests {
                 content: "Crew healthy".into(),
                 journal: "Personal".into(),
                 timestamp: None,
+                tags: None,
             }),
         )
         .await;
@@ -545,6 +667,7 @@ mod tests {
                 content: "Log".into(),
                 journal: name.into(),
                 timestamp: None,
+                tags: None,
             }),
         )
         .await;
@@ -565,6 +688,7 @@ mod tests {
                 content: "Updated log".into(),
                 journal: "Ship Operations".into(),
                 timestamp: None,
+                tags: None,
             }),
         )
         .await;
@@ -593,10 +717,238 @@ mod tests {
                 content: "Native log".into(),
                 journal: name.into(),
                 timestamp: None,
+                tags: None,
             }),
         )
         .await;
         assert_eq!(result.status(), StatusCode::SEE_OTHER);
         assert_eq!(result.headers()["location"], "/entry/2");
+    }
+
+    fn tag_form(content: &str, tags: Option<&str>) -> Form<EntryForm> {
+        Form(EntryForm {
+            title: "".into(),
+            content: content.into(),
+            journal: "Personal".into(),
+            timestamp: None,
+            tags: tags.map(str::to_string),
+        })
+    }
+
+    fn tag_query(tag: &str) -> Query<ListQuery> {
+        Query(ListQuery {
+            tag: Some(tag.into()),
+            ..ListQuery::default()
+        })
+    }
+
+    #[test]
+    fn form_tags_split_on_commas_and_spaces() {
+        assert_eq!(
+            parse_form_tags("Work, #planning  q4,,").unwrap(),
+            ["work", "planning", "q4"]
+        );
+        assert!(parse_form_tags("").unwrap().is_empty());
+        assert_eq!(parse_form_tags("ok, 9bad"), Err("9bad".to_string()));
+    }
+
+    #[tokio::test]
+    async fn form_tags_and_inline_tags_are_saved_and_filterable() {
+        let state = state();
+        let result = create_handler(
+            State(state.clone()),
+            Query(ListQuery::default()),
+            hx_headers(),
+            tag_form("Talked about #pricing", Some("urgent, work")),
+        )
+        .await;
+        assert_eq!(result.headers()["hx-redirect"], "/entry/1");
+        create_handler(
+            State(state.clone()),
+            Query(ListQuery::default()),
+            hx_headers(),
+            tag_form("No tags here", None),
+        )
+        .await;
+
+        let tagged = |tag: &str| {
+            let data = sidebar_data(&state, &tag_query(tag).0);
+            data.entries.iter().map(|e| e.id).collect::<Vec<_>>()
+        };
+        assert_eq!(tagged("urgent"), [1]);
+        assert_eq!(tagged("PRICING"), [1]);
+        assert!(tagged("nope").is_empty());
+
+        let data = sidebar_data(&state, &ListQuery::default());
+        assert_eq!(data.tags.len(), 3);
+
+        let page = index_handler(State(state.clone()), tag_query("urgent"), HeaderMap::new())
+            .await
+            .0;
+        assert!(page.contains("TAGS · #urgent"));
+        assert!(page.contains("1 MATCHING") || page.contains("1 ENTRIES ON RECORD"));
+        assert!(page.contains("#pricing"));
+        // the active tag's chip links to the unfiltered list
+        assert!(page.contains(r#"href="/" aria-current="true""#), "{page}");
+    }
+
+    async fn body_of(response: Response) -> String {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    #[tokio::test]
+    async fn invalid_form_tag_keeps_the_typed_text_and_saves_nothing() {
+        let state = state();
+        let form = Form(EntryForm {
+            title: "My <title>".into(),
+            content: "Long text I would hate to lose".into(),
+            journal: "Work".into(),
+            timestamp: None,
+            tags: Some("fine, no good!".into()),
+        });
+
+        let response = create_handler(
+            State(state.clone()),
+            Query(ListQuery::default()),
+            hx_headers(),
+            form,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = body_of(response).await;
+        assert!(html.contains("INVALID TAG: GOOD!"), "{html}");
+        assert!(html.contains("Long text I would hate to lose"));
+        assert!(html.contains(r#"value="My &lt;title&gt;""#));
+        assert!(html.contains(r#"value="Work""#));
+        assert!(html.contains(r#"value="fine, no good!""#));
+        assert!(html.contains("<form"), "the form must stay on screen");
+        assert!(
+            state
+                .journal
+                .lock()
+                .unwrap()
+                .list_entries()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_edit_keeps_the_typed_text_and_the_entry_unchanged() {
+        let state = state();
+        create_handler(
+            State(state.clone()),
+            Query(ListQuery::default()),
+            hx_headers(),
+            tag_form("Original", None),
+        )
+        .await;
+
+        let bad_tag = update_handler(
+            State(state.clone()),
+            Path(1),
+            Query(ListQuery::default()),
+            hx_headers(),
+            Form(EntryForm {
+                title: "".into(),
+                content: "Rewritten text".into(),
+                journal: "Personal".into(),
+                timestamp: None,
+                tags: Some("2025".into()),
+            }),
+        )
+        .await;
+        let html = body_of(bad_tag).await;
+        assert!(html.contains("INVALID TAG: 2025"));
+        assert!(html.contains("Rewritten text"));
+        assert!(html.contains(r#"action="/entry/1/edit""#));
+
+        // Same for any other failure, e.g. a malformed date
+        let bad_date = update_handler(
+            State(state.clone()),
+            Path(1),
+            Query(ListQuery::default()),
+            hx_headers(),
+            Form(EntryForm {
+                title: "".into(),
+                content: "Rewritten text".into(),
+                journal: "Personal".into(),
+                timestamp: Some("not a date".into()),
+                tags: None,
+            }),
+        )
+        .await;
+        let html = body_of(bad_date).await;
+        assert!(html.contains("ERROR SAVING ENTRY"));
+        assert!(html.contains("Rewritten text"));
+        assert!(html.contains(r#"value="not a date""#) || html.contains("entry-timestamp"));
+
+        let entry = state.journal.lock().unwrap().get_entry(1).unwrap().unwrap();
+        assert_eq!(entry.content, "Original");
+    }
+
+    #[tokio::test]
+    async fn updates_replace_extra_tags_or_keep_them_when_the_field_is_absent() {
+        let state = state();
+        create_handler(
+            State(state.clone()),
+            Query(ListQuery::default()),
+            hx_headers(),
+            tag_form("Body #inline", Some("extra")),
+        )
+        .await;
+        let tags = || {
+            state
+                .journal
+                .lock()
+                .unwrap()
+                .get_entry(1)
+                .unwrap()
+                .unwrap()
+                .tags
+        };
+
+        update_handler(
+            State(state.clone()),
+            Path(1),
+            Query(ListQuery::default()),
+            hx_headers(),
+            tag_form("Edited #inline", None),
+        )
+        .await;
+        assert_eq!(tags(), ["extra", "inline"]);
+
+        update_handler(
+            State(state.clone()),
+            Path(1),
+            Query(ListQuery::default()),
+            hx_headers(),
+            tag_form("Edited #inline", Some("")),
+        )
+        .await;
+        assert_eq!(tags(), ["inline"]);
+
+        // A tag filter survives a save only if the entry still has the tag
+        let kept = update_handler(
+            State(state.clone()),
+            Path(1),
+            tag_query("inline"),
+            hx_headers(),
+            tag_form("Edited #inline", Some("")),
+        )
+        .await;
+        assert_eq!(kept.headers()["hx-redirect"], "/entry/1?tag=inline");
+        let dropped = update_handler(
+            State(state),
+            Path(1),
+            tag_query("inline"),
+            hx_headers(),
+            tag_form("No tag now", Some("")),
+        )
+        .await;
+        assert_eq!(dropped.headers()["hx-redirect"], "/entry/1");
     }
 }

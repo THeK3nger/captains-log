@@ -1,4 +1,4 @@
-use crate::journal::{Journal, NewEntry};
+use crate::journal::{Journal, NewEntry, normalize_tag};
 use crate::time::localize;
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -38,11 +38,13 @@ impl<'a> Importer<'a> {
         };
 
         for entry in entries {
+            let tags = importable_tags(&entry.tags);
             match self.journal.create_entry(
                 NewEntry::new(&entry.content)
                     .title(entry.title.as_deref())
                     .journal(journal_category)
-                    .timestamp(entry.timestamp),
+                    .timestamp(entry.timestamp)
+                    .tags(&tags),
             ) {
                 Ok(_) => stats.imported += 1,
                 Err(e) => {
@@ -78,11 +80,13 @@ impl<'a> Importer<'a> {
         };
 
         for entry in entries {
+            let tags = importable_tags(&entry.tags);
             match self.journal.create_entry(
                 NewEntry::new(&entry.content)
                     .title(entry.title.as_deref())
                     .journal(journal_category)
-                    .timestamp(entry.timestamp),
+                    .timestamp(entry.timestamp)
+                    .tags(&tags),
             ) {
                 Ok(_) => stats.imported += 1,
                 Err(e) => {
@@ -112,6 +116,39 @@ struct ParsedEntry {
     timestamp: DateTime<Utc>,
     title: Option<String>,
     content: String,
+    tags: Vec<String>,
+}
+
+/// Tags from an external source that fit our tag syntax. Whitespace becomes
+/// `-` ("Date Night" -> "date-night"); anything else invalid is dropped.
+fn importable_tags(tags: &[String]) -> Vec<String> {
+    tags.iter()
+        .filter_map(|tag| normalize_tag(&tag.split_whitespace().collect::<Vec<_>>().join("-")))
+        .collect()
+}
+
+/// Split org tags off the end of a headline: "14:30 Title :a:b:" -> ("14:30 Title", ["a", "b"]).
+fn split_org_tags(header: &str) -> (&str, Vec<String>) {
+    let header = header.trim_end();
+    let (rest, last) = match header.rsplit_once(char::is_whitespace) {
+        Some((rest, last)) => (rest.trim_end(), last),
+        None => ("", header),
+    };
+    let is_tags = last.len() > 2
+        && last.starts_with(':')
+        && last.ends_with(':')
+        && !last.contains("::")
+        && last[1..last.len() - 1]
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '@' | '#' | '%' | ':'));
+    if !is_tags {
+        return (header, Vec::new());
+    }
+    let tags = last[1..last.len() - 1]
+        .split(':')
+        .map(str::to_string)
+        .collect();
+    (rest, tags)
 }
 
 /// Parse an org-journal file and extract entries
@@ -159,6 +196,7 @@ fn parse_org_journal(
             }
 
             let entry_header = line.strip_prefix("** ").unwrap().trim();
+            let (entry_header, tags) = split_org_tags(entry_header);
             let (time_str, title) = parse_entry_header(entry_header);
 
             // Parse timestamp
@@ -185,6 +223,7 @@ fn parse_org_journal(
                     timestamp,
                     title,
                     content: markdown_content,
+                    tags,
                 });
                 continue;
             }
@@ -418,6 +457,8 @@ struct DayOneEntry {
     is_pinned: bool,
     time_zone: Option<String>,
     location: Option<DayOneLocation>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -504,6 +545,7 @@ fn parse_dayone_json(content: &str, filter_date: Option<NaiveDate>) -> Result<Ve
             timestamp: utc_time,
             title,
             content,
+            tags: dayone_entry.tags,
         });
     }
 
@@ -549,6 +591,42 @@ mod tests {
         let (time, title) = parse_entry_header("14:30");
         assert_eq!(time, Some("14:30"));
         assert_eq!(title, None);
+    }
+
+    #[test]
+    fn splits_org_tags_off_the_headline() {
+        assert_eq!(
+            split_org_tags("14:30 My Title :a:b_c:"),
+            ("14:30 My Title", vec!["a".to_string(), "b_c".to_string()])
+        );
+        assert_eq!(
+            split_org_tags("14:30 :a:"),
+            ("14:30", vec!["a".to_string()])
+        );
+        assert_eq!(split_org_tags("14:30 Title"), ("14:30 Title", vec![]));
+        assert_eq!(
+            split_org_tags("14:30 ratio 1:2"),
+            ("14:30 ratio 1:2", vec![])
+        );
+        assert_eq!(split_org_tags("14:30 Title ::"), ("14:30 Title ::", vec![]));
+    }
+
+    #[test]
+    fn org_import_reads_headline_tags() {
+        let org = "* Saturday, 07/09/2025\n:PROPERTIES:\n:CREATED:  20250907\n:END:\n** 14:30 Plan :work:q4:\nBody\n";
+        let entries = parse_org_journal(org, None, Some(chrono_tz::UTC)).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title.as_deref(), Some("Plan"));
+        assert_eq!(entries[0].tags, ["work", "q4"]);
+    }
+
+    #[test]
+    fn dayone_tags_are_read_and_made_valid() {
+        let json = r#"{"metadata":{"version":"1.0"},"entries":[
+            {"uuid":"1","creationDate":"2025-09-07T10:00:00Z","text":"Hello","tags":["Date Night","work","9lives","a,b"]}
+        ]}"#;
+        let entries = parse_dayone_json(json, None).unwrap();
+        assert_eq!(importable_tags(&entries[0].tags), ["date-night", "work"]);
     }
 
     #[test]

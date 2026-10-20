@@ -12,7 +12,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Import System** - ORG-journal and DayOne JSON import functionality with date and journal filtering
 ✅ **Database Override** - CLI parameter to override database location for any command
 ✅ **Quick Entry Creation** - Create entries with inline content or using external editor
-✅ **Tags** - Inline `#tags` plus explicit `--tag`, filtering (AND) in list/search/export, `cl tags` management
+✅ **Tags** - Inline `#tags` plus explicit `--tag`, filtering (AND) in list/search/export, `cl tags` management, web UI chips/filter/form field, ORG/DayOne import, ORG/Markdown/JSON export
 ✅ **Stardate Mode Integration** - Consistent stardate formatting across all entry display commands
 
 ## Build & Test Commands
@@ -124,6 +124,10 @@ cargo build
 ./target/debug/cl tags remove <id> <tag>...           # not for #tags written in the text
 ./target/debug/cl tags rename <old> <new>             # also rewrites #old in entry texts; merges
 ./target/debug/cl tags reindex                        # rescan all texts (entries saved before tagging)
+# Web UI (cl serve): tag chips on entries, a TAGS filter panel (?tag=name, one tag at a time),
+# and a TAGS field in the entry form (extra tags; #tags in the content count too).
+# Export: JSON has "tags"; Markdown adds a "Tags:" line for tags not already in the text;
+# ORG writes native headline tags (:a:b:, '-' becomes '_'). Import reads ORG headline tags and DayOne "tags".
 
 # Show help
 ./target/debug/cl --help
