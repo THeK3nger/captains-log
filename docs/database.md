@@ -4,7 +4,7 @@ This document outlines the database model for CaptainLog, detailing the structur
 
 ## Database Schema
 
-The database schema consists of the following tables:
+The database currently contains one table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS entries (
@@ -17,6 +17,18 @@ CREATE TABLE IF NOT EXISTS entries (
     journal TEXT DEFAULT 'Personal',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entries_timestamp
+    ON entries(timestamp);
+CREATE INDEX IF NOT EXISTS idx_entries_created_at
+    ON entries(created_at);
+CREATE INDEX IF NOT EXISTS idx_entries_journal_timestamp
+    ON entries(journal, timestamp);
 ```
-Yep. At the moment there is only one table.
+
+## Schema Migrations
+
+CaptainLog applies pending schema migrations automatically when it opens the database. Migrations are applied in order, and SQLite's `PRAGMA user_version` records the latest completed schema version.
+
+Each migration and its version update run in the same transaction. If a migration fails, the database remains at the last successfully applied version. CaptainLog also rejects databases whose schema version is newer than the application supports, preventing an older application from opening an incompatible database.
