@@ -281,12 +281,19 @@ impl Journal {
         self.collect_entries(&query, [])
     }
 
-    pub fn search_entries(&self, query: &str) -> Result<Vec<Entry>> {
-        let search_pattern = format!("%{}%", query);
-        let query = format!(
-            "{ENTRY_SELECT} WHERE content LIKE ?1 OR title LIKE ?1 ORDER BY created_at DESC"
-        );
-        self.collect_entries(&query, [&search_pattern])
+    /// Entries whose title or content contain `query` (case-insensitive, literal),
+    /// narrowed by `filters`, newest first.
+    pub fn search_entries(&self, query: &str, filters: &EntryFilters) -> Result<Vec<Entry>> {
+        let query = query.to_lowercase();
+        let mut entries = self.list_entries_filtered(filters)?;
+        entries.retain(|entry| {
+            entry.content.to_lowercase().contains(&query)
+                || entry
+                    .title
+                    .as_deref()
+                    .is_some_and(|title| title.to_lowercase().contains(&query))
+        });
+        Ok(entries)
     }
 
     pub fn delete_entry(&self, id: i64) -> Result<bool> {

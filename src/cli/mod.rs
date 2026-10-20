@@ -12,7 +12,9 @@ use commands::audio::{handle_play_command, handle_record_command};
 use commands::config::{ConfigAction, handle_config_command};
 use commands::edit::{create_entry, delete_entry, edit_entry, move_entry};
 use commands::import_export::{ExportArgs, ImportArgs, export, import};
-use commands::list::{ListArgs, list_entries, search_entries, show_calendar, show_entry};
+use commands::list::{
+    ListArgs, SearchArgs, list_entries, search_entries, show_calendar, show_entry,
+};
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -26,10 +28,7 @@ pub enum Commands {
     },
 
     /// Search entries
-    Search {
-        /// Search query
-        query: String,
-    },
+    Search(SearchArgs),
 
     /// Delete an entry
     Delete {
@@ -134,7 +133,7 @@ pub fn handle_command(
     match command {
         Commands::List(args) => list_entries(journal, config, args),
         Commands::Show { id } => show_entry(journal, config, id),
-        Commands::Search { query } => search_entries(journal, config, &query),
+        Commands::Search(args) => search_entries(journal, config, args),
         Commands::Delete {
             id,
             yes,

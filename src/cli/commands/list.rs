@@ -43,6 +43,28 @@ pub struct ListArgs {
     pub oldest_first: bool,
 }
 
+#[derive(Args)]
+pub struct SearchArgs {
+    /// Search query (case-insensitive, matched literally in titles and content)
+    pub query: String,
+
+    /// Filter by journal category
+    #[arg(long)]
+    pub journal: Option<String>,
+
+    /// Only entries since date (YYYY-MM-DD or relative, e.g. "last week")
+    #[arg(long)]
+    pub since: Option<String>,
+
+    /// Only entries until date (YYYY-MM-DD or relative)
+    #[arg(long)]
+    pub until: Option<String>,
+
+    /// Maximum number of results to show (newest first)
+    #[arg(short, long)]
+    pub limit: Option<usize>,
+}
+
 pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Result<()> {
     let ListArgs {
         date,
@@ -120,7 +142,12 @@ pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Resul
     for entry in entries {
         println!(
             "{}",
-            format_entry_summary(&entry, config.display.stardate_mode, config.get_timezone())
+            format_entry_summary(
+                &entry,
+                config.display.stardate_mode,
+                config.get_timezone(),
+                None
+            )
         );
     }
 
@@ -137,27 +164,65 @@ pub fn show_entry(journal: &Journal, config: &Config, id: i64) -> Result<()> {
     }
 }
 
-pub fn search_entries(journal: &Journal, config: &Config, query: &str) -> Result<()> {
-    let entries = journal.search_entries(query)?;
+pub fn search_entries(journal: &Journal, config: &Config, args: SearchArgs) -> Result<()> {
+    let SearchArgs {
+        query,
+        journal: journal_filter,
+        since,
+        until,
+        limit,
+    } = args;
+
+    if limit == Some(0) {
+        anyhow::bail!("--limit must be greater than 0");
+    }
+
+    let filters = parse_entry_filters(
+        None,
+        since.as_deref(),
+        until.as_deref(),
+        journal_filter.as_deref(),
+        config.get_timezone(),
+    )?;
+    let mut entries = journal.search_entries(&query, &filters)?;
+
     if entries.is_empty() {
         println!(
             "{}",
             format!("No entries found matching '{}'", query).yellow()
         );
-    } else {
+        return Ok(());
+    }
+
+    let total_entries = entries.len();
+    if let Some(limit) = limit {
+        entries.truncate(limit);
+    }
+
+    println!(
+        "{}",
+        if entries.len() == total_entries {
+            format!("Found {total_entries} entries matching '{query}':")
+        } else {
+            format!(
+                "Found {total_entries} entries matching '{query}', showing latest {}:",
+                entries.len()
+            )
+        }
+        .green()
+        .bold()
+    );
+    println!();
+    for entry in entries {
         println!(
             "{}",
-            format!("Found {} entries matching '{}':", entries.len(), query)
-                .green()
-                .bold()
+            format_entry_summary(
+                &entry,
+                config.display.stardate_mode,
+                config.get_timezone(),
+                Some(&query)
+            )
         );
-        println!();
-        for entry in entries {
-            println!(
-                "{}",
-                format_entry_summary(&entry, config.display.stardate_mode, config.get_timezone())
-            );
-        }
     }
     Ok(())
 }
@@ -210,9 +275,99 @@ pub fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) {
     println!("{}", "─".repeat(width as usize).bright_blue());
 }
 
-fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) -> String {
-    // Strip newlines and limit content preview to 40 chars.
-    let content_preview = truncate_with_ellipsis(&entry.content.replace('\n', " "), 40);
+const PREVIEW_CHARS: usize = 40;
+
+/// Case-insensitive fold that keeps one char per char, so indices stay aligned with the input.
+fn fold_char(c: char) -> char {
+    let mut lower = c.to_lowercase();
+    match (lower.next(), lower.next()) {
+        (Some(single), None) => single,
+        _ => c,
+    }
+}
+
+/// Char ranges `[start, end)` of non-overlapping case-insensitive matches of `query`.
+fn match_ranges(chars: &[char], query: &str) -> Vec<(usize, usize)> {
+    let needle: Vec<char> = query.chars().map(fold_char).collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let haystack: Vec<char> = chars.iter().copied().map(fold_char).collect();
+
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i + needle.len() <= haystack.len() {
+        if haystack[i..].starts_with(&needle) {
+            ranges.push((i, i + needle.len()));
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    ranges
+}
+
+/// `text` with every match of `query` highlighted and the rest styled by `base`.
+fn highlight_matches(text: &str, query: &str, base: impl Fn(&str) -> ColoredString) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut cursor = 0;
+    for (start, end) in match_ranges(&chars, query) {
+        if start > cursor {
+            out.push_str(&base(&chars[cursor..start].iter().collect::<String>()).to_string());
+        }
+        out.push_str(
+            &chars[start..end]
+                .iter()
+                .collect::<String>()
+                .black()
+                .on_yellow()
+                .bold()
+                .to_string(),
+        );
+        cursor = end;
+    }
+    if cursor < chars.len() {
+        out.push_str(&base(&chars[cursor..].iter().collect::<String>()).to_string());
+    }
+    out
+}
+
+/// One-line preview of `content`; with a query, the window moves so the first match is visible.
+fn content_preview(content: &str, query: Option<&str>) -> String {
+    let flat = content.replace('\n', " ");
+    let Some(first) = query.and_then(|q| {
+        let chars: Vec<char> = flat.chars().collect();
+        match_ranges(&chars, q)
+            .first()
+            .map(|&(start, end)| (start, end))
+    }) else {
+        return truncate_with_ellipsis(&flat, PREVIEW_CHARS);
+    };
+    if first.1 <= PREVIEW_CHARS {
+        return truncate_with_ellipsis(&flat, PREVIEW_CHARS);
+    }
+
+    let chars: Vec<char> = flat.chars().collect();
+    let start = first.0.saturating_sub(10);
+    let end = (start + PREVIEW_CHARS.max(first.1 - first.0 + 10)).min(chars.len());
+    let window: String = chars[start..end].iter().collect();
+    let suffix = if end < chars.len() { "..." } else { "" };
+    let prefix = if start > 0 { "..." } else { "" };
+    format!("{prefix}{}{suffix}", window.trim())
+}
+
+fn format_entry_summary(
+    entry: &Entry,
+    stardate_mode: bool,
+    timezone: Option<Tz>,
+    highlight: Option<&str>,
+) -> String {
+    let preview = content_preview(&entry.content, highlight);
+    let content_preview = match highlight {
+        Some(query) => highlight_matches(&preview, query, |s| s.normal()),
+        None => preview,
+    };
 
     let id = format!("[{}]", entry.id).bright_blue().bold();
 
@@ -242,18 +397,17 @@ fn format_entry_summary(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>
             id,
             date,
             journal,
-            title.green().bold(),
-            content_preview.normal(),
+            match highlight {
+                Some(query) => highlight_matches(title, query, |s| s.green().bold()),
+                None => title.green().bold().to_string(),
+            },
+            content_preview,
             audio_indicator
         )
     } else {
         format!(
             "{} {} {} - {}{}",
-            id,
-            date,
-            journal,
-            content_preview.normal(),
-            audio_indicator
+            id, date, journal, content_preview, audio_indicator
         )
     }
 }
@@ -367,7 +521,7 @@ pub fn show_calendar(
         for entry in entries {
             println!(
                 "{}",
-                format_entry_summary(&entry, config.display.stardate_mode, tz)
+                format_entry_summary(&entry, config.display.stardate_mode, tz, None)
             );
         }
     }
