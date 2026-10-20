@@ -62,9 +62,30 @@ fn matches_search(title: Option<&str>, content: &str, search: &str) -> bool {
         || content.to_lowercase().contains(&search)
 }
 
-/// Everything the page chrome needs: the (filtered) entry list and all journal names.
-fn sidebar_data(state: &AppState, query: &ListQuery) -> (Vec<Entry>, Vec<String>) {
+/// Everything the page chrome needs: the (filtered) entry list and all journal names,
+/// plus a message for each load that failed.
+struct SidebarData {
+    entries: Vec<Entry>,
+    journals: Vec<String>,
+    errors: Vec<&'static str>,
+}
+
+/// Unwraps a load result, logging a failure and recording `message` instead of hiding it.
+fn load_or_report<T: Default>(
+    result: Result<T>,
+    message: &'static str,
+    errors: &mut Vec<&'static str>,
+) -> T {
+    result.unwrap_or_else(|err| {
+        eprintln!("{message}: {err:#}");
+        errors.push(message);
+        T::default()
+    })
+}
+
+fn sidebar_data(state: &AppState, query: &ListQuery) -> SidebarData {
     let j = state.journal.lock().expect("journal lock poisoned");
+    let mut errors = Vec::new();
     let entries = match query.journal() {
         Some(name) => j.list_entries_filtered(&EntryFilters {
             journal: Some(name.to_string()),
@@ -72,11 +93,16 @@ fn sidebar_data(state: &AppState, query: &ListQuery) -> (Vec<Entry>, Vec<String>
         }),
         None => j.list_entries(),
     };
-    let mut entries = entries.unwrap_or_default();
+    let mut entries = load_or_report(entries, "UNABLE TO LOAD ENTRIES", &mut errors);
     if let Some(search) = query.search() {
         entries.retain(|entry| matches_search(entry.title.as_deref(), &entry.content, search));
     }
-    (entries, j.list_journals().unwrap_or_default())
+    let journals = load_or_report(j.list_journals(), "UNABLE TO LOAD JOURNALS", &mut errors);
+    SidebarData {
+        entries,
+        journals,
+        errors,
+    }
 }
 
 #[derive(Clone)]
@@ -137,8 +163,15 @@ fn page_response(
     let markup = if is_partial_request(headers) {
         detail
     } else {
-        let (entries, journals) = sidebar_data(state, query);
-        templates::page(&entries, active_id, detail, &journals, query)
+        let data = sidebar_data(state, query);
+        templates::page(
+            &data.entries,
+            active_id,
+            detail,
+            &data.journals,
+            &data.errors,
+            query,
+        )
     };
     Html(markup.into_string())
 }
@@ -155,7 +188,11 @@ async fn entry_handler(
     };
     let detail = match result {
         Ok(Some(entry)) => templates::entry_detail(&entry, &query),
-        _ => templates::message_panel("ENTRY NOT FOUND", &query),
+        Ok(None) => templates::message_panel("ENTRY NOT FOUND", &query),
+        Err(err) => {
+            eprintln!("unable to load entry {id}: {err:#}");
+            templates::message_panel("UNABLE TO LOAD ENTRY", &query)
+        }
     };
 
     page_response(&state, &headers, &query, Some(id), detail)
@@ -188,15 +225,16 @@ async fn new_form_handler(
 ) -> Html<String> {
     let journals = {
         let j = state.journal.lock().expect("journal lock poisoned");
-        j.list_journals().unwrap_or_default()
+        j.list_journals()
     };
-    page_response(
-        &state,
-        &headers,
-        &query,
-        None,
-        templates::entry_form(None, &journals, &query),
-    )
+    let detail = match journals {
+        Ok(journals) => templates::entry_form(None, &journals, &query),
+        Err(err) => {
+            eprintln!("unable to load journals: {err:#}");
+            templates::message_panel("UNABLE TO LOAD JOURNALS", &query)
+        }
+    };
+    page_response(&state, &headers, &query, None, detail)
 }
 
 async fn create_handler(
@@ -231,16 +269,22 @@ async fn edit_form_handler(
 ) -> Html<String> {
     let (result, journals) = {
         let j = state.journal.lock().expect("journal lock poisoned");
-        (j.get_entry(id), j.list_journals().unwrap_or_default())
+        (j.get_entry(id), j.list_journals())
     };
     page_response(
         &state,
         &headers,
         &query,
         Some(id),
-        match result {
-            Ok(Some(entry)) => templates::entry_form(Some(&entry), &journals, &query),
-            _ => templates::message_panel("ENTRY NOT FOUND", &query),
+        match (result, journals) {
+            (Ok(Some(entry)), Ok(journals)) => {
+                templates::entry_form(Some(&entry), &journals, &query)
+            }
+            (Ok(None), _) => templates::message_panel("ENTRY NOT FOUND", &query),
+            (Err(err), _) | (_, Err(err)) => {
+                eprintln!("unable to load entry {id} for editing: {err:#}");
+                templates::message_panel("UNABLE TO LOAD ENTRY", &query)
+            }
         },
     )
 }
@@ -315,6 +359,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_loads_are_reported_instead_of_shown_as_empty() {
+        let db = Database::new_with_path(":memory:").unwrap();
+        db.connection().execute("DROP TABLE entries", []).unwrap();
+        let state = AppState {
+            journal: Arc::new(Mutex::new(Journal::new(db))),
+        };
+        let page = index_handler(
+            State(state.clone()),
+            Query(ListQuery::default()),
+            HeaderMap::new(),
+        )
+        .await
+        .0;
+        assert!(page.contains("UNABLE TO LOAD ENTRIES"));
+        assert!(page.contains("UNABLE TO LOAD JOURNALS"));
+        assert!(!page.contains("NO ENTRIES ON RECORD"));
+
+        let detail = entry_handler(
+            State(state),
+            Path(1),
+            Query(ListQuery::default()),
+            hx_headers(),
+        )
+        .await
+        .0;
+        assert!(detail.contains("UNABLE TO LOAD ENTRY"));
+    }
+
+    #[tokio::test]
     async fn search_combines_with_journal_and_matches_titles_or_content_literally() {
         let state = state();
         let title_id;
@@ -341,7 +414,7 @@ mod tests {
             journal: Some("Ship Operations".into()),
             q: Some(" NAVIGATION ".into()),
         };
-        let (entries, _) = sidebar_data(&state, &filter);
+        let entries = sidebar_data(&state, &filter).entries;
         let mut ids: Vec<_> = entries.iter().map(|entry| entry.id).collect();
         ids.sort();
         assert_eq!(ids, [title_id, content_id]);
@@ -357,7 +430,7 @@ mod tests {
             journal: Some("Ship Operations".into()),
             q: Some("%_".into()),
         };
-        let (entries, _) = sidebar_data(&state, &literal);
+        let entries = sidebar_data(&state, &literal).entries;
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, title_id);
         let empty = index_handler(

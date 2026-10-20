@@ -225,12 +225,13 @@ pub fn entry_form(entry: Option<&Entry>, journals: &[String], filter: &ListQuery
 }
 
 /// The full page: sidebar, entry list and `detail` in the main pane.
-/// `journals` fills the sidebar; `filter` scopes the entry list and navigation.
+/// `journals` fills the sidebar; `errors` are shown above the entry list; `filter` scopes the entry list and navigation.
 pub fn page(
     entries: &[Entry],
     active_id: Option<i64>,
     detail: Markup,
     journals: &[String],
+    errors: &[&str],
     filter: &ListQuery,
 ) -> Markup {
     let journal = filter.journal();
@@ -296,7 +297,15 @@ pub fn page(
                                     a.search-clear href=(format!("/{}", list_query(journal, None))) { "CLEAR SEARCH" }
                                 }
                             }
-                            div.entry-list #entry-list aria-label="Entries" { (entry_list(entries, active_id, filter)) }
+                            @for error in errors {
+                                div.load-error role="alert" { (error) }
+                            }
+                            div.entry-list #entry-list aria-label="Entries" {
+                                // A failed load must not masquerade as "no entries".
+                                @if !(entries.is_empty() && !errors.is_empty()) {
+                                    (entry_list(entries, active_id, filter))
+                                }
+                            }
                         }
                         main.entry-detail #entry-detail aria-label="Entry detail" { (detail) }
                     }
