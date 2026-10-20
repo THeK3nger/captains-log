@@ -364,42 +364,69 @@ impl Journal {
         filters: &EntryFilters,
         order: SortOrder,
     ) -> Result<Vec<Entry>> {
+        self.list_entries_filtered_limited(filters, order, None)
+    }
+
+    /// Like `list_entries_filtered_with_order`, but returns at most `limit` entries
+    /// (the first ones in `order`), applied in SQL.
+    pub fn list_entries_filtered_limited(
+        &self,
+        filters: &EntryFilters,
+        order: SortOrder,
+        limit: Option<usize>,
+    ) -> Result<Vec<Entry>> {
+        let (where_clause, mut params) = self.where_clause(filters)?;
+        let mut query = format!(
+            "{ENTRY_SELECT}{where_clause} ORDER BY timestamp {}",
+            order.as_sql()
+        );
+        if let Some(limit) = limit {
+            query.push_str(" LIMIT ?");
+            params.push(Box::new(i64::try_from(limit).unwrap_or(i64::MAX)));
+        }
+
+        self.collect_entries(&query, rusqlite::params_from_iter(params))
+    }
+
+    /// Number of entries matching `filters`.
+    pub fn count_entries(&self, filters: &EntryFilters) -> Result<usize> {
+        let (where_clause, params) = self.where_clause(filters)?;
+        let count: i64 = self.db.connection().query_row(
+            &format!("SELECT COUNT(*) FROM entries{where_clause}"),
+            rusqlite::params_from_iter(params),
+            |row| row.get(0),
+        )?;
+        Ok(usize::try_from(count).unwrap_or_default())
+    }
+
+    /// SQL `WHERE` clause (with leading space, empty when unfiltered) and its parameters.
+    fn where_clause(
+        &self,
+        filters: &EntryFilters,
+    ) -> Result<(String, Vec<Box<dyn rusqlite::ToSql>>)> {
         let (start, end) = filters.timestamp_bounds(self.timezone)?;
-        let journal = filters.journal.as_deref();
-        let mut query = ENTRY_SELECT.to_string();
         let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        if start.is_some() {
+        if let Some(start) = start {
             conditions.push("timestamp >= ?");
+            params.push(Box::new(start));
         }
-        if end.is_some() {
+        if let Some(end) = end {
             conditions.push("timestamp < ?");
+            params.push(Box::new(end));
         }
-        if journal.is_some() {
+        if let Some(journal) = filters.journal.as_deref() {
             conditions.push("journal = ?");
+            params.push(Box::new(journal.to_string()));
         }
 
-        if filters.is_active() {
-            query.push_str(" WHERE ");
-            query.push_str(&conditions.join(" AND "));
-        }
-
-        query.push_str(&format!(" ORDER BY timestamp {}", order.as_sql()));
-
-        match (start.as_ref(), end.as_ref(), journal) {
-            (Some(start), Some(end), Some(journal)) => {
-                self.collect_entries(&query, params![start, end, journal])
-            }
-            (Some(start), Some(end), None) => self.collect_entries(&query, params![start, end]),
-            (Some(start), None, Some(journal)) => {
-                self.collect_entries(&query, params![start, journal])
-            }
-            (Some(start), None, None) => self.collect_entries(&query, params![start]),
-            (None, Some(end), Some(journal)) => self.collect_entries(&query, params![end, journal]),
-            (None, Some(end), None) => self.collect_entries(&query, params![end]),
-            (None, None, Some(journal)) => self.collect_entries(&query, params![journal]),
-            (None, None, None) => self.collect_entries(&query, []),
-        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+        Ok((where_clause, params))
     }
 
     pub fn list_entries_for_month(&self, year: i32, month: u32) -> Result<Vec<Entry>> {

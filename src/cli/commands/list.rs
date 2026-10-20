@@ -2,7 +2,7 @@ use crate::cli::dateparser::parse_entry_filters;
 use crate::cli::formatting::{get_wrap_width, wrap_text};
 use crate::cli::stardate::Stardate;
 use crate::config::{Config, DEFAULT_LIST_LIMIT};
-use crate::journal::{Entry, Journal, truncate_with_ellipsis};
+use crate::journal::{Entry, Journal, SortOrder, truncate_with_ellipsis};
 use crate::time::{days_in_month, to_local};
 use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate, Utc};
@@ -89,18 +89,12 @@ pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Resul
         config.get_timezone(),
     )?;
 
-    let mut entries = if filters.is_active() {
-        journal.list_entries_filtered(&filters)?
-    } else {
-        journal.list_entries()?
-    };
-
-    if entries.is_empty() {
+    let total_entries = journal.count_entries(&filters)?;
+    if total_entries == 0 {
         println!("{}", "No entries found".yellow());
         return Ok(());
     }
 
-    let total_entries = entries.len();
     let effective_limit = if all {
         None
     } else {
@@ -111,9 +105,8 @@ pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Resul
         )
     };
 
-    if let Some(limit) = effective_limit {
-        entries.truncate(limit);
-    }
+    let mut entries =
+        journal.list_entries_filtered_limited(&filters, SortOrder::NewestFirst, effective_limit)?;
 
     if oldest_first {
         entries.reverse();
