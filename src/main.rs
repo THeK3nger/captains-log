@@ -41,8 +41,8 @@ fn main() -> Result<()> {
         config.get_database_path()?
     };
 
-    if let Some(Commands::Serve { port }) = &cli.command {
-        return server::run(&db_path, *port);
+    if let Some(Commands::Serve { port, open_browser }) = &cli.command {
+        return server::run(&db_path, *port, *open_browser);
     }
 
     let db = Database::new_with_path(&db_path)?;

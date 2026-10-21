@@ -136,6 +136,10 @@ pub enum Commands {
         /// Port to listen on
         #[arg(short, long, default_value_t = 4343)]
         port: u16,
+
+        /// Open the served page in the default browser
+        #[arg(long = "open-browser", alias = "openBrowser")]
+        open_browser: bool,
     },
 }
 

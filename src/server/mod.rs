@@ -171,7 +171,22 @@ struct AppState {
     journal: Arc<Mutex<Journal>>,
 }
 
-pub fn run(db_path: &std::path::Path, port: u16) -> Result<()> {
+fn open_in_browser(url: &str) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(url).spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(url).spawn()
+    };
+    if let Err(e) = result {
+        eprintln!("  Could not open browser: {e}");
+    }
+}
+
+pub fn run(db_path: &std::path::Path, port: u16, open_browser: bool) -> Result<()> {
     let db = Database::new_with_path(db_path)?;
     let journal = Journal::new(db);
     let state = AppState {
@@ -193,6 +208,9 @@ pub fn run(db_path: &std::path::Path, port: u16) -> Result<()> {
 
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
         println!("  LCARS interface online → http://localhost:{port}");
+        if open_browser {
+            open_in_browser(&format!("http://localhost:{port}"));
+        }
         axum::serve(listener, app).await?;
         anyhow::Ok(())
     })
