@@ -14,6 +14,8 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Quick Entry Creation** - Create entries with inline content or using external editor
 ✅ **Tags** - Inline `#tags` plus explicit `--tag`, filtering (AND) in list/search/export, `cl tags` management, web UI chips/filter/form field, ORG/DayOne import, ORG/Markdown/JSON export
 ✅ **Stardate Mode Integration** - Consistent stardate formatting across all entry display commands
+✅ **Statistics** - `cl stats`: totals, per-journal counts, streaks, average length, busiest weekday, top tags
+✅ **Web UI** - `cl serve` read-only LCARS interface (`--port`, `--open-browser`)
 
 ## Build & Test Commands
 
@@ -139,7 +141,7 @@ cargo build
 
 ### Development Commands
 ```bash
-# Build and run tests (when implemented)
+# Run tests
 cargo test
 
 # Check for linting issues
@@ -165,7 +167,15 @@ src/
 │   ├── dateparser.rs    # Date parsing utilities
 │   ├── formatting.rs    # Markdown rendering utilities
 │   ├── frontmatter.rs   # YAML frontmatter parsing and formatting
-│   └── stardate.rs      # Stardate conversion system
+│   ├── stardate.rs      # Stardate conversion system
+│   └── commands/        # One module per command group
+│       ├── audio.rs     # record / play
+│       ├── config.rs    # config show / set / path
+│       ├── edit.rs      # new / edit / delete / move
+│       ├── import_export.rs
+│       ├── list.rs      # list / search / show / calendar
+│       ├── stats.rs     # stats (computation is a pure fn with unit tests)
+│       └── tags.rs      # tags list / add / remove / rename / reindex
 ├── config/
 │   └── mod.rs           # Configuration management and file handling
 ├── database/
@@ -174,8 +184,14 @@ src/
 │   └── mod.rs           # Export functionality (JSON, Markdown, and ORG formats)
 ├── import/
 │   └── mod.rs           # Import functionality (ORG-journal and DayOne formats)
-└── journal/
-    └── mod.rs           # Entry model and CRUD operations
+├── journal/
+│   ├── mod.rs           # Entry model and CRUD operations
+│   └── tags.rs          # Tag parsing, normalization and renaming
+├── server/
+│   ├── mod.rs           # Web UI (`cl serve`) routes
+│   ├── templates.rs     # HTML templates
+│   └── static/          # CSS/JS assets
+└── time.rs              # Timezone-aware date helpers shared across modules
 ```
 
 ## Database
@@ -309,6 +325,12 @@ All date-based filters (--date, --since, --until) support both absolute and rela
 - [x] Visual formatting with grayed-out fractional components for readability
 - [x] Seamless switching between standard timestamps and stardate format
 
+### Statistics
+- [x] `cl stats` with `--journal`, `--since`, `--until` filters
+- [x] Entry totals, per-journal counts, last 7/30 days
+- [x] Current and longest daily streak (a streak survives until the day after the last entry)
+- [x] Average words per entry, busiest weekday, top 5 tags
+
 ### Audio Recording System
 - [x] Audio recording with automatic transcription using Whisper
 - [x] Platform-specific tool detection (sox/arecord for recording, afplay/ffplay for playback)
@@ -429,6 +451,10 @@ All functionality has been manually tested:
 7. Seamless switching between standard timestamps and stardate display
 8. Configuration persistence across application restarts
 9. Backward compatibility maintained with existing timestamp functionality
+
+### Statistics Testing
+1. Unit tests in `src/cli/commands/stats.rs` cover streaks, counts, tags and the broken-streak case
+2. Manually checked on a `-d` test database: empty DB, multiple journals, journal/date filters
 
 ### Audio Recording System Testing
 1. Platform detection working correctly (macOS/Linux tool selection)
