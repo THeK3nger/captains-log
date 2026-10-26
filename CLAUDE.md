@@ -129,6 +129,10 @@ cargo build
 # Export: JSON has "tags"; Markdown adds a "Tags:" line for tags not already in the text;
 # ORG writes native headline tags (:a:b:, '-' becomes '_'). Import reads ORG headline tags and DayOne "tags".
 
+# Statistics: totals, per-journal counts, streaks, avg length, busiest weekday, top tags
+./target/debug/cl stats
+./target/debug/cl stats --journal Work --since "last month"
+
 # Show help
 ./target/debug/cl --help
 ```
@@ -321,7 +325,6 @@ All date-based filters (--date, --since, --until) support both absolute and rela
 - [x] 16kHz mono WAV format optimized for speech recognition
 
 ## Future Enhancement Ideas
-- [ ] Tagging system for entries
 - [ ] Additional export formats (CSV, XML)
 - [ ] Additional import formats (Joplin, Notion, etc.)
 - [ ] Full-text search improvements

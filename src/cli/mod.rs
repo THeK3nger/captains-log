@@ -15,6 +15,7 @@ use commands::import_export::{ExportArgs, ImportArgs, export, import};
 use commands::list::{
     ListArgs, SearchArgs, list_entries, search_entries, show_calendar, show_entry,
 };
+use commands::stats::{StatsArgs, show_stats};
 use commands::tags::{TagsAction, handle_tags_command};
 
 #[derive(Subcommand)]
@@ -78,6 +79,9 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<TagsAction>,
     },
+
+    /// Show writing statistics (counts, streaks, top tags)
+    Stats(StatsArgs),
 
     /// Display calendar view of entries
     Calendar {
@@ -168,6 +172,7 @@ pub fn handle_command(
             tags,
             content,
         } => create_entry(journal, config, content, new_journal.as_deref(), &tags),
+        Commands::Stats(args) => show_stats(journal, config, args),
         Commands::Tags { action } => handle_tags_command(journal, action),
         Commands::Calendar {
             year,
