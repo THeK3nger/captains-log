@@ -1,3 +1,4 @@
+mod journals;
 mod tags;
 
 use std::fmt;
@@ -10,13 +11,19 @@ use chrono_tz::Tz;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
+pub use journals::JournalInfo;
 pub use tags::normalize_tag;
 use tags::{extract_tags, rename_in_text};
 
+/// Entries joined with their journal, so filters can use `journals.name`.
+const ENTRY_FROM: &str = " FROM entries JOIN journals ON journals.id = entries.journal_id";
+
 const ENTRY_SELECT: &str = r#"
-    SELECT id, timestamp, title, content, audio_path, image_paths,
-           journal, created_at, updated_at
-    FROM entries
+    SELECT entries.id AS id, entries.timestamp AS timestamp, entries.title AS title,
+           entries.content AS content, entries.audio_path AS audio_path,
+           entries.image_paths AS image_paths, journals.name AS journal,
+           entries.created_at AS created_at, entries.updated_at AS updated_at
+    FROM entries JOIN journals ON journals.id = entries.journal_id
 "#;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,9 +57,7 @@ impl Entry {
             content: row.get("content")?,
             audio_path: row.get("audio_path")?,
             image_paths,
-            journal: row
-                .get("journal")
-                .unwrap_or_else(|_| DEFAULT_JOURNAL.to_string()),
+            journal: row.get("journal")?,
             tags: Vec::new(),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
@@ -330,15 +335,16 @@ impl Journal {
         let timestamp = entry.timestamp.unwrap_or(now);
         let tags = resolve_tags(entry.title, entry.content, entry.tags)?;
         let tx = conn.unchecked_transaction()?;
+        let journal_id = journals::ensure_journal(&tx, entry.journal.unwrap_or(DEFAULT_JOURNAL))?;
 
         tx.execute(
-            "INSERT INTO entries (timestamp, title, content, journal, audio_path, created_at, updated_at)
+            "INSERT INTO entries (timestamp, title, content, journal_id, audio_path, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 timestamp,
                 entry.title,
                 entry.content,
-                entry.journal.unwrap_or(DEFAULT_JOURNAL),
+                journal_id,
                 entry.audio_path,
                 now,
                 now
@@ -354,7 +360,7 @@ impl Journal {
 
     pub fn get_entry(&self, id: i64) -> Result<Option<Entry>> {
         let conn = self.db.connection();
-        let mut stmt = conn.prepare(&format!("{ENTRY_SELECT} WHERE id = ?1"))?;
+        let mut stmt = conn.prepare(&format!("{ENTRY_SELECT} WHERE entries.id = ?1"))?;
 
         let mut entries: Vec<Entry> = stmt
             .query_row([id], Entry::from_row)
@@ -371,7 +377,10 @@ impl Journal {
     }
 
     pub fn list_entries_with_order(&self, order: SortOrder) -> Result<Vec<Entry>> {
-        let query = format!("{ENTRY_SELECT} ORDER BY timestamp {}", order.as_sql());
+        let query = format!(
+            "{ENTRY_SELECT} ORDER BY entries.timestamp {}",
+            order.as_sql()
+        );
 
         self.collect_entries(&query, [])
     }
@@ -428,10 +437,11 @@ impl Journal {
         let now = Utc::now();
         let tags = resolve_tags(title, content, extra_tags)?;
         let tx = conn.unchecked_transaction()?;
+        let journal_id = journals::ensure_journal(&tx, journal)?;
 
         let rows_affected = tx.execute(
-            "UPDATE entries SET title = ?1, content = ?2, journal = ?3, timestamp = ?4, updated_at = ?5 WHERE id = ?6",
-            params![title, content, journal, timestamp, now, id],
+            "UPDATE entries SET title = ?1, content = ?2, journal_id = ?3, timestamp = ?4, updated_at = ?5 WHERE id = ?6",
+            params![title, content, journal_id, timestamp, now, id],
         )?;
         if rows_affected > 0 {
             write_entry_tags(&tx, id, &tags)?;
@@ -442,23 +452,21 @@ impl Journal {
         Ok(rows_affected > 0)
     }
 
-    pub fn list_journals(&self) -> Result<Vec<String>> {
-        let conn = self.db.connection();
-        let mut stmt = conn.prepare("SELECT DISTINCT journal FROM entries ORDER BY journal ASC")?;
-        let journals = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<Vec<String>, _>>()?;
-        Ok(journals)
-    }
-
+    /// Move an entry to `new_journal`, creating the journal if needed.
+    /// Returns false (and creates nothing) if the entry does not exist.
     pub fn move_entry(&self, id: i64, new_journal: &str) -> Result<bool> {
         let conn = self.db.connection();
         let now = Utc::now();
+        let tx = conn.unchecked_transaction()?;
+        let journal_id = journals::ensure_journal(&tx, new_journal)?;
 
-        let rows_affected = conn.execute(
-            "UPDATE entries SET journal = ?1, updated_at = ?2 WHERE id = ?3",
-            params![new_journal, now, id],
+        let rows_affected = tx.execute(
+            "UPDATE entries SET journal_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![journal_id, now, id],
         )?;
+        if rows_affected > 0 {
+            tx.commit()?;
+        }
 
         Ok(rows_affected > 0)
     }
@@ -485,7 +493,7 @@ impl Journal {
     ) -> Result<Vec<Entry>> {
         let (where_clause, mut params) = self.where_clause(filters)?;
         let mut query = format!(
-            "{ENTRY_SELECT}{where_clause} ORDER BY timestamp {}",
+            "{ENTRY_SELECT}{where_clause} ORDER BY entries.timestamp {}",
             order.as_sql()
         );
         if let Some(limit) = limit {
@@ -500,7 +508,7 @@ impl Journal {
     pub fn count_entries(&self, filters: &EntryFilters) -> Result<usize> {
         let (where_clause, params) = self.where_clause(filters)?;
         let count: i64 = self.db.connection().query_row(
-            &format!("SELECT COUNT(*) FROM entries{where_clause}"),
+            &format!("SELECT COUNT(*){ENTRY_FROM}{where_clause}"),
             rusqlite::params_from_iter(params),
             |row| row.get(0),
         )?;
@@ -517,15 +525,16 @@ impl Journal {
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         if let Some(start) = start {
-            conditions.push("timestamp >= ?");
+            conditions.push("entries.timestamp >= ?");
             params.push(Box::new(start));
         }
         if let Some(end) = end {
-            conditions.push("timestamp < ?");
+            conditions.push("entries.timestamp < ?");
             params.push(Box::new(end));
         }
         if let Some(journal) = filters.journal.as_deref() {
-            conditions.push("journal = ?");
+            // Case-insensitive: the column is COLLATE NOCASE
+            conditions.push("journals.name = ?");
             params.push(Box::new(journal.to_string()));
         }
         for tag in &filters.tags {

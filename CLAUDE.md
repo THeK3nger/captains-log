@@ -16,6 +16,7 @@ A terminal-based journaling application written in Rust with SQLite storage.
 ✅ **Stardate Mode Integration** - Consistent stardate formatting across all entry display commands
 ✅ **Statistics** - `cl stats`: totals, per-journal counts, streaks, average length, busiest weekday, top tags
 ✅ **Web UI** - `cl serve` read-only LCARS interface (`--port`, `--open-browser`)
+✅ **Journals table** - Journals are rows with optional description and color; `cl journals` manages them
 
 ## Build & Test Commands
 
@@ -131,6 +132,15 @@ cargo build
 # Export: JSON has "tags"; Markdown adds a "Tags:" line for tags not already in the text;
 # ORG writes native headline tags (:a:b:, '-' becomes '_'). Import reads ORG headline tags and DayOne "tags".
 
+# Journals: a table of their own (created on first use, names case-insensitive)
+./target/debug/cl journals                            # names, entry counts, descriptions, colors
+./target/debug/cl journals add Away --description "Away missions" --color cyan
+./target/debug/cl journals set Work --color "#ff9900" # --description/--color; "" clears
+./target/debug/cl journals rename Work Duty           # refuses to rename onto an existing journal
+./target/debug/cl journals delete Away                # only empty journals
+# Colors: #rrggbb, #rgb or black/red/green/yellow/blue/magenta/cyan/white.
+# Web UI: a journal's color paints its sidebar button; the description is its tooltip.
+
 # Statistics: totals, per-journal counts, streaks, avg length, busiest weekday, top tags
 ./target/debug/cl stats
 ./target/debug/cl stats --journal Work --since "last month"
@@ -173,6 +183,7 @@ src/
 │       ├── config.rs    # config show / set / path
 │       ├── edit.rs      # new / edit / delete / move
 │       ├── import_export.rs
+│       ├── journals.rs  # journals list / add / set / rename / delete
 │       ├── list.rs      # list / search / show / calendar
 │       ├── stats.rs     # stats (computation is a pure fn with unit tests)
 │       └── tags.rs      # tags list / add / remove / rename / reindex
@@ -186,6 +197,7 @@ src/
 │   └── mod.rs           # Import functionality (ORG-journal and DayOne formats)
 ├── journal/
 │   ├── mod.rs           # Entry model and CRUD operations
+│   ├── journals.rs      # Journal table: metadata, rename, delete
 │   └── tags.rs          # Tag parsing, normalization and renaming
 ├── server/
 │   ├── mod.rs           # Web UI (`cl serve`) routes
@@ -198,9 +210,12 @@ src/
 - Default Location: `~/.local/share/captains-log/journal.db`
 - Configurable via `database.path` setting
 - Override per-command with `-d` or `--database` parameter
-- Schema: entries table with id, timestamp, title, content, audio_path, image_paths, journal, created_at, updated_at
-- Automatic migrations on first run
-- Journal field defaults to "Personal" for backward compatibility
+- Schema: entries (id, timestamp, title, content, audio_path, image_paths, journal_id, created_at, updated_at),
+  journals (id, name UNIQUE NOCASE, description, color, created_at), tags, entry_tags
+- Versioned migrations (`PRAGMA user_version`, `MIGRATIONS` in `src/database/mod.rs`) run on every open,
+  with foreign keys off; migration 3 moved the old `entries.journal` text into the journals table
+- Entries without a journal go to "Personal"
+- Any command opens (and migrates) the database, even `config show`
 
 ## Configuration
 - Location: `~/.config/captains-log/config.json` (Linux/macOS) or `%APPDATA%\captains-log\config.json` (Windows)

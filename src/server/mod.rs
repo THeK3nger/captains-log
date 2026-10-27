@@ -13,7 +13,9 @@ use std::sync::{Arc, Mutex};
 mod templates;
 
 use crate::database::Database;
-use crate::journal::{Entry, EntryFilters, Journal, NewEntry, TagCount, normalize_tag};
+use crate::journal::{
+    Entry, EntryFilters, Journal, JournalInfo, NewEntry, TagCount, normalize_tag,
+};
 use crate::time::localize;
 
 #[derive(Deserialize)]
@@ -126,7 +128,7 @@ fn matches_search(title: Option<&str>, content: &str, search: &str) -> bool {
 /// and tags, plus a message for each load that failed.
 struct SidebarData {
     entries: Vec<Entry>,
-    journals: Vec<String>,
+    journals: Vec<JournalInfo>,
     tags: Vec<TagCount>,
     errors: Vec<&'static str>,
 }

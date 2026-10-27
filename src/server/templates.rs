@@ -2,7 +2,7 @@
 //! interpolated value by default; only `PreEscaped` content is emitted raw.
 
 use super::ListQuery;
-use crate::journal::{Entry, TagCount};
+use crate::journal::{Entry, JournalInfo, TagCount};
 use crate::time::to_local;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use pulldown_cmark::{Options, Parser as MdParser, html as md_html};
@@ -11,7 +11,7 @@ use std::fmt::Write;
 const CSS: &str = include_str!("static/lcars.css");
 const JS: &str = include_str!("static/app.js");
 
-/// Colors cycled through for the sidebar journal buttons.
+/// Colors cycled through for the sidebar buttons of journals without a color.
 const JOURNAL_COLORS: [&str; 5] = ["purple", "blue", "salmon", "tan", "red"];
 
 /// Percent-encodes a query-string value.
@@ -195,7 +195,7 @@ pub struct FormDraft<'a> {
 /// With a `draft`, its values replace the entry's and its error is shown above the fields.
 pub fn entry_form(
     entry: Option<&Entry>,
-    journals: &[String],
+    journals: &[JournalInfo],
     filter: &ListQuery,
     draft: Option<&FormDraft>,
 ) -> Markup {
@@ -253,7 +253,7 @@ pub fn entry_form(
                     input.form-input #entry-journal type="text" name="journal" value=(journal)
                         list="journal-list" autocomplete="off";
                     datalist id="journal-list" {
-                        @for name in journals { option value=(name); }
+                        @for j in journals { option value=(j.name); }
                     }
                 }
                 div.form-field {
@@ -290,7 +290,7 @@ pub fn page(
     entries: &[Entry],
     active_id: Option<i64>,
     detail: Markup,
-    journals: &[String],
+    journals: &[JournalInfo],
     tags: &[TagCount],
     errors: &[&str],
     filter: &ListQuery,
@@ -333,12 +333,19 @@ pub fn page(
                             a class=(if journal.is_none() { "sb-btn c-tan active" } else { "sb-btn c-tan" })
                                 href=(format!("/{}", list_query(None, search, tag))) aria-current=[journal.is_none().then_some("page")]
                             { "ALL ENTRIES" }
-                            @for (i, name) in journals.iter().enumerate() {
-                                @let color = JOURNAL_COLORS[i % JOURNAL_COLORS.len()];
-                                @let active = journal == Some(name.as_str());
-                                a class=(format!("sb-btn c-{color}{}", if active { " active" } else { "" }))
+                            @for (i, j) in journals.iter().enumerate() {
+                                @let name = j.name.as_str();
+                                // A journal's own color (validated when saved) wins over the cycled palette
+                                @let class = if j.color.is_some() { "custom" } else { JOURNAL_COLORS[i % JOURNAL_COLORS.len()] };
+                                @let active = journal.is_some_and(|current| current.eq_ignore_ascii_case(name));
+                                @let title = match &j.description {
+                                    Some(description) => format!("{name} — {description}"),
+                                    None => name.to_string(),
+                                };
+                                a class=(format!("sb-btn c-{class}{}", if active { " active" } else { "" }))
+                                    style=[j.color.as_ref().map(|color| format!("--journal-color: {color}"))]
                                     href=(format!("/{}", list_query(Some(name), search, tag)))
-                                    aria-current=[active.then_some("page")] title=(name)
+                                    aria-current=[active.then_some("page")] title=(title)
                                 { span.sb-label { (name) } }
                             }
                         }

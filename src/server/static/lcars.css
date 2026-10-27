@@ -181,6 +181,7 @@ html, body {
 .c-purple { background: var(--purple); }
 .c-blue   { background: var(--blue); }
 .c-red    { background: var(--red); }
+.c-custom { background: var(--journal-color); }
 
 .sb-spacer {
   flex: 1;

@@ -12,6 +12,7 @@ use commands::audio::{handle_play_command, handle_record_command};
 use commands::config::{ConfigAction, handle_config_command};
 use commands::edit::{create_entry, delete_entry, edit_entry, move_entry};
 use commands::import_export::{ExportArgs, ImportArgs, export, import};
+use commands::journals::{JournalsAction, handle_journals_command};
 use commands::list::{
     ListArgs, SearchArgs, list_entries, search_entries, show_calendar, show_entry,
 };
@@ -72,6 +73,12 @@ pub enum Commands {
 
         /// Quick entry content (if provided, creates entry directly without opening editor)
         content: Vec<String>,
+    },
+
+    /// List and manage journals (description, color, rename, delete)
+    Journals {
+        #[command(subcommand)]
+        action: Option<JournalsAction>,
     },
 
     /// List and manage tags
@@ -173,6 +180,7 @@ pub fn handle_command(
             content,
         } => create_entry(journal, config, content, new_journal.as_deref(), &tags),
         Commands::Stats(args) => show_stats(journal, config, args),
+        Commands::Journals { action } => handle_journals_command(journal, action),
         Commands::Tags { action } => handle_tags_command(journal, action),
         Commands::Calendar {
             year,
