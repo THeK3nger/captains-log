@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub database: DatabaseConfig,
@@ -98,19 +98,6 @@ impl Default for AudioConfig {
             playback_tool: None,
             max_recording_seconds: default_max_recording_seconds(),
             sample_rate: default_sample_rate(),
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        // Find default project directories
-
-        Config {
-            database: DatabaseConfig::default(),
-            editor: EditorConfig::default(),
-            display: DisplayConfig::default(),
-            audio: AudioConfig::default(),
         }
     }
 }

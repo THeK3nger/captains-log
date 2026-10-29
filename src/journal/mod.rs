@@ -73,28 +73,6 @@ impl Entry {
             .cloned()
             .collect()
     }
-
-    pub fn get_summary(&self, summary_size: usize) -> String {
-        let content_preview = truncate_with_ellipsis(&self.content, summary_size);
-        if let Some(title) = self.title.as_deref() {
-            format!(
-                "[{}] {} [{}] - {} - {}",
-                self.id,
-                self.timestamp.format("%Y-%m-%d %H:%M"),
-                self.journal,
-                title,
-                content_preview
-            )
-        } else {
-            format!(
-                "[{}] {} [{}] - {}",
-                self.id,
-                self.timestamp.format("%Y-%m-%d %H:%M"),
-                self.journal,
-                content_preview
-            )
-        }
-    }
 }
 
 type TimestampBounds = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
@@ -181,14 +159,6 @@ pub struct EntryFilters {
 }
 
 impl EntryFilters {
-    pub fn is_active(&self) -> bool {
-        self.date.is_some()
-            || self.since.is_some()
-            || self.until.is_some()
-            || self.journal.is_some()
-            || !self.tags.is_empty()
-    }
-
     pub fn for_month(year: i32, month: u32, journal: Option<&str>) -> Result<Self> {
         let last_day = days_in_month(year, month)
             .with_context(|| format!("Invalid year/month combination: {year}-{month:02}"))?;
@@ -551,10 +521,6 @@ impl Journal {
             format!(" WHERE {}", conditions.join(" AND "))
         };
         Ok((where_clause, params))
-    }
-
-    pub fn list_entries_for_month(&self, year: i32, month: u32) -> Result<Vec<Entry>> {
-        self.list_entries_for_month_filtered(year, month, None)
     }
 
     pub fn list_entries_for_month_filtered(

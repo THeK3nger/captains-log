@@ -1,4 +1,3 @@
-use crate::config::Config;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::fs;
@@ -131,12 +130,6 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(config: &Config) -> Result<Self> {
-        let db_path = config.get_database_path()?;
-
-        Self::new_with_path(&db_path)
-    }
-
     pub fn new_with_path<P: AsRef<std::path::Path>>(db_path: P) -> Result<Self> {
         let db_path = db_path.as_ref();
 

@@ -23,6 +23,8 @@ const SECONDS_IN_A_DAY: i64 = 86400;
 
 pub trait Stardate {
     fn to_stardate(&self) -> f64;
+    // Only exercised by the round-trip tests for now.
+    #[allow(dead_code)]
     fn from_stardate(sd: f64) -> DateTime<Utc>;
 }
 
