@@ -202,7 +202,8 @@ src/
 ├── server/
 │   ├── mod.rs           # Web UI (`cl serve`) routes
 │   ├── templates.rs     # HTML templates
-│   └── static/          # CSS/JS assets
+│   └── static/          # CSS/JS assets, compiled into the binary
+│       └── vendor/      # htmx 2 and the Antonio/Exo 2 fonts (served at /static/, no CDN)
 └── time.rs              # Timezone-aware date helpers shared across modules
 ```
 
