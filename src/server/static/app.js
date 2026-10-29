@@ -21,7 +21,7 @@
   // A form re-rendered after a failed save carries the user's text as its
   // defaults, so it counts as unsaved whenever anything was typed.
   function hasUnsavedInput(form) {
-    if (!form) return false;
+    if (!form || form.dataset.saved) return false;
     var fields = Array.from(form.querySelectorAll('input:not([type="hidden"]), textarea'));
     if (form.querySelector('.form-error')) {
       return fields.some(function (field) { return field.name !== 'journal' && field.name !== 'timestamp' && field.value.trim(); });
@@ -88,13 +88,13 @@
     if (event.target.closest('#entry-detail .btn-cancel')) clearDraft(openEntryForm());
   }, true);
 
-  // A save that leaves the form behind succeeded; a failed one re-renders it.
-  document.addEventListener('htmx:beforeSwap', function (event) {
-    if (event.detail.target.id !== 'entry-detail') return;
-    var entryForm = openEntryForm();
-    if (!entryForm || !entryForm.contains(event.detail.requestConfig.elt)) return;
-    if (event.detail.requestConfig.verb === 'post' && event.detail.successful &&
-        !/class="[^"]*\bentry-form\b/.test(event.detail.serverResponse)) clearDraft(entryForm);
+  // The server announces a successful save just before redirecting to the
+  // entry; a failed one re-renders the form instead and keeps the draft.
+  document.addEventListener('entry-saved', function (event) {
+    var entryForm = event.target.closest('#entry-detail .entry-form');
+    if (!entryForm) return;
+    clearDraft(entryForm);
+    entryForm.dataset.saved = 'true';
   });
 
   function openFormIsDirty() {

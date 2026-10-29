@@ -10,6 +10,8 @@ use std::fmt::Write;
 
 const CSS: &str = include_str!("static/lcars.css");
 const JS: &str = include_str!("static/app.js");
+/// Path of the bundled htmx under `/static/`; named after its version so caches refresh on upgrade.
+pub const HTMX_FILE: &str = "htmx-2.0.11.min.js";
 
 /// Colors cycled through for the sidebar buttons of journals without a color.
 const JOURNAL_COLORS: [&str; 5] = ["purple", "blue", "salmon", "tan", "red"];
@@ -306,9 +308,7 @@ pub fn page(
                 meta charset="UTF-8";
                 meta name="viewport" content="width=device-width, initial-scale=1.0";
                 title { "CAPTAIN'S LOG — LCARS" }
-                link rel="preconnect" href="https://fonts.googleapis.com";
-                link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&family=Exo+2:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet";
-                script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" {}
+                script src=(format!("/static/{HTMX_FILE}")) {}
                 style { (PreEscaped(CSS)) }
             }
             body hx-history="false" {

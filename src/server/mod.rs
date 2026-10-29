@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{
     Router,
     extract::{Form, Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -168,6 +168,61 @@ fn sidebar_data(state: &AppState, query: &ListQuery) -> SidebarData {
     }
 }
 
+/// Files bundled into the binary and served under `/static/`, so the web UI
+/// needs no network access. Responses are cached for good: give a file a new
+/// name whenever its contents change (the htmx name carries its version).
+const STATIC_FILES: &[(&str, &str, &[u8])] = &[
+    (
+        templates::HTMX_FILE,
+        "text/javascript; charset=utf-8",
+        include_bytes!("static/vendor/htmx.min.js"),
+    ),
+    (
+        "fonts/antonio-latin.woff2",
+        "font/woff2",
+        include_bytes!("static/vendor/fonts/antonio-latin.woff2"),
+    ),
+    (
+        "fonts/antonio-latin-ext.woff2",
+        "font/woff2",
+        include_bytes!("static/vendor/fonts/antonio-latin-ext.woff2"),
+    ),
+    (
+        "fonts/exo2-latin.woff2",
+        "font/woff2",
+        include_bytes!("static/vendor/fonts/exo2-latin.woff2"),
+    ),
+    (
+        "fonts/exo2-latin-ext.woff2",
+        "font/woff2",
+        include_bytes!("static/vendor/fonts/exo2-latin-ext.woff2"),
+    ),
+    (
+        "fonts/exo2-italic-latin.woff2",
+        "font/woff2",
+        include_bytes!("static/vendor/fonts/exo2-italic-latin.woff2"),
+    ),
+    (
+        "fonts/exo2-italic-latin-ext.woff2",
+        "font/woff2",
+        include_bytes!("static/vendor/fonts/exo2-italic-latin-ext.woff2"),
+    ),
+];
+
+async fn static_handler(Path(path): Path<String>) -> Response {
+    match STATIC_FILES.iter().find(|(name, _, _)| *name == path) {
+        Some((_, content_type, bytes)) => (
+            [
+                (header::CONTENT_TYPE, *content_type),
+                (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+            ],
+            *bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     journal: Arc<Mutex<Journal>>,
@@ -199,6 +254,7 @@ pub fn run(db_path: &std::path::Path, port: u16, open_browser: bool) -> Result<(
         let app = Router::new()
             .route("/", get(index_handler))
             .route("/placeholder", get(placeholder_handler))
+            .route("/static/{*path}", get(static_handler))
             .route("/entry/{id}", get(entry_handler))
             .route("/form/new", get(new_form_handler))
             .route("/entries", post(create_handler))
@@ -314,7 +370,17 @@ fn save_redirect(
     if !is_partial_request(headers) {
         return Redirect::to(&url).into_response();
     }
-    (StatusCode::OK, [("HX-Redirect", url)], String::new()).into_response()
+    // htmx fires `entry-saved` before following the redirect, so the page can
+    // drop the saved form's draft without asking to leave unsaved changes.
+    (
+        StatusCode::OK,
+        [
+            ("HX-Trigger", "entry-saved".to_string()),
+            ("HX-Redirect", url),
+        ],
+        String::new(),
+    )
+        .into_response()
 }
 
 async fn placeholder_handler() -> Html<String> {
@@ -634,6 +700,26 @@ mod tests {
         )
         .await;
         assert_eq!(result.headers()["hx-redirect"], "/entry/1?journal=Personal");
+        assert_eq!(result.headers()["hx-trigger"], "entry-saved");
+    }
+
+    #[tokio::test]
+    async fn bundled_assets_are_served_and_unknown_ones_are_not() {
+        let response = static_handler(Path(templates::HTMX_FILE.to_string())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/javascript; charset=utf-8"
+        );
+        assert!(body_of(response).await.contains("htmx"));
+
+        let font = static_handler(Path("fonts/antonio-latin.woff2".into())).await;
+        assert_eq!(font.headers()[header::CONTENT_TYPE], "font/woff2");
+
+        for missing in ["nope.js", "../mod.rs", "fonts"] {
+            let response = static_handler(Path(missing.into())).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{missing}");
+        }
     }
 
     #[tokio::test]
