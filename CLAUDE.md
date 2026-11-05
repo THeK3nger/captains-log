@@ -63,12 +63,14 @@ cargo build
 
 # Show specific entry
 ./target/debug/cl show <id>
+./target/debug/cl show last                          # the newest entry
 
 # Search entries
 ./target/debug/cl search "<query>"
 
 # Edit entry (opens external editor)
 ./target/debug/cl edit <id>
+./target/debug/cl edit last                          # fix a typo in what you just wrote
 
 # Delete entry
 ./target/debug/cl delete <id>

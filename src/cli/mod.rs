@@ -5,7 +5,7 @@ pub mod frontmatter;
 pub mod stardate;
 
 use crate::config::Config;
-use crate::journal::Journal;
+use crate::journal::{EntryFilters, Journal, SortOrder};
 use anyhow::Result;
 use clap::Subcommand;
 use commands::audio::{handle_play_command, handle_record_command};
@@ -18,6 +18,45 @@ use commands::list::{
 };
 use commands::stats::{StatsArgs, show_stats};
 use commands::tags::{TagsAction, handle_tags_command};
+use std::str::FromStr;
+
+/// An entry given on the command line: a numeric ID or `last` (the newest entry).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryRef {
+    Id(i64),
+    Last,
+}
+
+impl FromStr for EntryRef {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("last") {
+            return Ok(EntryRef::Last);
+        }
+        s.parse::<i64>()
+            .map(EntryRef::Id)
+            .map_err(|_| format!("'{s}' is not an entry ID or 'last'"))
+    }
+}
+
+impl EntryRef {
+    /// Resolve to a concrete entry ID, failing if `last` is used on an empty journal.
+    pub fn resolve(self, journal: &Journal) -> Result<i64> {
+        match self {
+            EntryRef::Id(id) => Ok(id),
+            EntryRef::Last => journal
+                .list_entries_filtered_limited(
+                    &EntryFilters::default(),
+                    SortOrder::NewestFirst,
+                    Some(1),
+                )?
+                .first()
+                .map(|entry| entry.id)
+                .ok_or_else(|| anyhow::anyhow!("No entries found")),
+        }
+    }
+}
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -26,8 +65,8 @@ pub enum Commands {
 
     /// Show a specific entry by ID
     Show {
-        /// Entry ID to show
-        id: i64,
+        /// Entry ID to show, or `last` for the newest entry
+        id: EntryRef,
     },
 
     /// Search entries
@@ -57,8 +96,8 @@ pub enum Commands {
 
     /// Edit an existing entry
     Edit {
-        /// Entry ID to edit
-        id: i64,
+        /// Entry ID to edit, or `last` for the newest entry
+        id: EntryRef,
     },
 
     /// Create a new entry
@@ -162,7 +201,7 @@ pub fn handle_command(
 ) -> Result<()> {
     match command {
         Commands::List(args) => list_entries(journal, config, args),
-        Commands::Show { id } => show_entry(journal, config, id),
+        Commands::Show { id } => show_entry(journal, config, id.resolve(journal)?),
         Commands::Search(args) => search_entries(journal, config, args),
         Commands::Delete {
             id,
@@ -173,7 +212,7 @@ pub fn handle_command(
             id,
             journal: target_journal,
         } => move_entry(journal, id, &target_journal),
-        Commands::Edit { id } => edit_entry(journal, id, config),
+        Commands::Edit { id } => edit_entry(journal, id.resolve(journal)?, config),
         Commands::New {
             journal: new_journal,
             tags,
@@ -209,5 +248,34 @@ pub fn handle_command(
             // handled in main.rs before handle_command is called
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::Database;
+    use crate::journal::NewEntry;
+
+    fn journal() -> Journal {
+        Journal::new(Database::new_with_path(":memory:").unwrap())
+    }
+
+    #[test]
+    fn parses_ids_and_last() {
+        assert_eq!("12".parse(), Ok(EntryRef::Id(12)));
+        assert_eq!("last".parse(), Ok(EntryRef::Last));
+        assert_eq!("LAST".parse(), Ok(EntryRef::Last));
+        assert!("latest".parse::<EntryRef>().is_err());
+    }
+
+    #[test]
+    fn last_resolves_to_newest_entry() {
+        let j = journal();
+        assert!(EntryRef::Last.resolve(&j).is_err());
+        j.create_entry(NewEntry::new("first")).unwrap();
+        let second = j.create_entry(NewEntry::new("second")).unwrap();
+        assert_eq!(EntryRef::Last.resolve(&j).unwrap(), second);
+        assert_eq!(EntryRef::Id(1).resolve(&j).unwrap(), 1);
     }
 }
