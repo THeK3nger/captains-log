@@ -160,7 +160,7 @@ pub fn list_entries(journal: &Journal, config: &Config, args: ListArgs) -> Resul
 pub fn show_entry(journal: &Journal, config: &Config, id: i64) -> Result<()> {
     match journal.get_entry(id)? {
         Some(entry) => {
-            print_entry(&entry, config.display.stardate_mode, config.get_timezone());
+            print_entry(&entry, config);
             Ok(())
         }
         None => anyhow::bail!("Entry {} not found", id),
@@ -232,7 +232,20 @@ pub fn search_entries(journal: &Journal, config: &Config, args: SearchArgs) -> R
     Ok(())
 }
 
-pub fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) {
+/// Format a timestamp with a user-supplied strftime pattern, falling back to the
+/// default pattern if it is invalid (chrono's `to_string` would panic on it).
+fn format_date(date: &chrono::DateTime<chrono::FixedOffset>, pattern: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    if write!(out, "{}", date.format(pattern)).is_err() {
+        out = date.format("%Y-%m-%d %H:%M:%S").to_string();
+    }
+    out
+}
+
+pub fn print_entry(entry: &Entry, config: &Config) {
+    let stardate_mode = config.display.stardate_mode;
+    let timezone = config.get_timezone();
     let width = get_wrap_width();
     println!("{}", "─".repeat(width as usize).bright_blue());
     println!(
@@ -250,10 +263,11 @@ pub fn print_entry(entry: &Entry, stardate_mode: bool, timezone: Option<Tz>) {
         println!(
             "{}: {}",
             "Date".cyan().bold(),
-            to_local(&entry.timestamp, timezone)
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string()
-                .white()
+            format_date(
+                &to_local(&entry.timestamp, timezone),
+                &config.display.date_format
+            )
+            .white()
         );
     }
     println!(

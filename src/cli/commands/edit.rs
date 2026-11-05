@@ -94,7 +94,7 @@ pub fn delete_entry(
         // Show the entry to be deleted
         println!("{}", "Entry to be deleted:".yellow().bold());
         println!();
-        print_entry(&entry, config.display.stardate_mode, config.get_timezone());
+        print_entry(&entry, config);
         println!();
 
         let prompt = "Are you sure you want to delete this entry? (y/N): "
