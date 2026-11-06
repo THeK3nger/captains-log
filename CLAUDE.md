@@ -356,7 +356,7 @@ All date-based filters (--date, --since, --until) support both absolute and rela
 - [x] Play command to replay audio from entries
 - [x] Audio file storage in dedicated directory alongside database
 - [x] Relative path storage in database for portability
-- [x] Graceful Ctrl+C handling during recording
+- [x] Stop recording with Enter or Ctrl+C (or at max duration); the tool streams raw PCM to stdout and we write the WAV ourselves, so no signals or platform-specific code
 - [x] Configurable max recording duration
 - [x] Audio indicator (🎤) in entry summaries and detailed views
 - [x] Whisper.cpp integration for speech-to-text transcription
@@ -478,7 +478,7 @@ All functionality has been manually tested:
 1. Platform detection working correctly (macOS/Linux tool selection)
 2. Recording tools detected in priority order (arecord → sox → ffmpeg on Linux)
 3. Playback tools detected in priority order (afplay on macOS, ffplay on Linux)
-4. Audio recording with Ctrl+C graceful shutdown functional
+4. Audio recording stops cleanly on Enter, Ctrl+C or max duration (only verified with a fake `sox` emitting PCM; real tools untested)
 5. Audio files created with correct format (16kHz mono WAV)
 6. Audio files stored in dedicated audio/ directory alongside database
 7. Relative path storage in database working correctly
