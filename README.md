@@ -12,12 +12,20 @@ Logs are stored in a SQLite database.
 - **Search Functionality**: Quickly find past entries using keywords or dates.
 - **Stardate Mode**: Of course, I can render dates in _pseudo-Stardate_ format for that authentic _Star Trek_ feel.
 - **Import**: I added some random importers (from now it supports `org-jorunal` and DayOne)
+- **Audio Entries**: Record microphone audio with `cl record`, optionally transcribe it, and replay it with `cl play <id>`.
 
 ### Planned Features
 
 - **Encryption**: Secure your journal entries with encryption.
-- **Audio Entries**: Record and store audio logs like a true Starfleet officer.
 - **Image Support**: Embed images in your journal entries.
+
+## Audio Recording
+
+`cl record --no-transcribe --max-duration 300` records up to five minutes. Enter or Ctrl+C stops it earlier.
+
+Recordings use signed 16-bit little-endian mono WAV at the configured `audio.sample_rate` (16 kHz by default). An incomplete final sample is discarded. Recording stops with an error if the classic RIFF size limit is exceeded.
+
+Recorder and PCM stream errors preserve complete samples in a finalized partial WAV alongside the database, without creating a journal entry. Filesystem failures can prevent finalization.
 
 ## Motivation
 
