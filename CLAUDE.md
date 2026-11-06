@@ -147,6 +147,14 @@ cargo build
 ./target/debug/cl stats
 ./target/debug/cl stats --journal Work --since "last month"
 
+# Whisper models (stored in <data dir>/models/ggml-<name>.bin; download is native, no curl needed)
+./target/debug/cl models                              # installed (active marked) + built-in list of main models
+./target/debug/cl models list --remote                # live list from Hugging Face, incl. quantized variants (falls back to built-in)
+./target/debug/cl models install small.en [--select] [--force]
+./target/debug/cl models use small.en                 # sets audio.whisper_model
+./target/debug/cl models remove tiny.en [--force]     # --force needed for the active model
+./target/debug/cl models path
+
 # Show help
 ./target/debug/cl --help
 ```
@@ -171,6 +179,7 @@ src/
 │   ├── mod.rs           # Audio module root and public API
 │   ├── storage.rs       # Audio file management and path handling
 │   ├── platform.rs      # Platform detection and tool selection
+│   ├── models.rs        # Whisper model files: paths, listing, download (ureq), removal
 │   ├── recording.rs     # Audio recording implementation
 │   ├── playback.rs      # Audio playback implementation
 │   └── transcription.rs # Whisper integration for speech-to-text
@@ -187,6 +196,7 @@ src/
 │       ├── import_export.rs
 │       ├── journals.rs  # journals list / add / set / rename / delete
 │       ├── list.rs      # list / search / show / calendar
+│       ├── models.rs    # models list / install / remove / use / path
 │       ├── stats.rs     # stats (computation is a pure fn with unit tests)
 │       └── tags.rs      # tags list / add / remove / rename / reindex
 ├── config/
@@ -361,6 +371,7 @@ All date-based filters (--date, --since, --until) support both absolute and rela
 - [x] Audio indicator (🎤) in entry summaries and detailed views
 - [x] Whisper.cpp integration for speech-to-text transcription
 - [x] Configurable Whisper model selection
+- [x] `cl models` to list, install (HTTPS download via ureq, `.part` file renamed when complete), remove and select models; `list --remote` reads the live Hugging Face listing
 - [x] Error handling with fallback for transcription failures
 - [x] 16kHz mono WAV format optimized for speech recognition
 

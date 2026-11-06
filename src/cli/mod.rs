@@ -16,6 +16,7 @@ use commands::journals::{JournalsAction, handle_journals_command};
 use commands::list::{
     ListArgs, SearchArgs, list_entries, search_entries, show_calendar, show_entry,
 };
+use commands::models::{ModelsAction, handle_models_command};
 use commands::stats::{StatsArgs, show_stats};
 use commands::tags::{TagsAction, handle_tags_command};
 use std::str::FromStr;
@@ -126,6 +127,12 @@ pub enum Commands {
         action: Option<TagsAction>,
     },
 
+    /// Manage Whisper transcription models (list, install, remove, use)
+    Models {
+        #[command(subcommand)]
+        action: Option<ModelsAction>,
+    },
+
     /// Show writing statistics (counts, streaks, top tags)
     Stats(StatsArgs),
 
@@ -221,6 +228,7 @@ pub fn handle_command(
         Commands::Stats(args) => show_stats(journal, config, args),
         Commands::Journals { action } => handle_journals_command(journal, action),
         Commands::Tags { action } => handle_tags_command(journal, action),
+        Commands::Models { action } => handle_models_command(action, config),
         Commands::Calendar {
             year,
             month,

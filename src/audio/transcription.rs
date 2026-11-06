@@ -1,7 +1,6 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
 use colored::Colorize;
-use directories::ProjectDirs;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -51,25 +50,12 @@ pub fn detect_whisper() -> Result<String> {
 
 /// Get the path to the Whisper model
 fn get_model_path(model_name: &str) -> Result<PathBuf> {
-    let proj_dirs =
-        ProjectDirs::from("", "", "captains-log").context("Failed to get project directories")?;
-
-    let models_dir = proj_dirs.data_dir().join("models");
-
-    // Ensure models directory exists
+    let models_dir = super::models::models_dir()?;
     if !models_dir.exists() {
         fs::create_dir_all(&models_dir)
             .with_context(|| format!("Failed to create models directory at {:?}", models_dir))?;
     }
-
-    // Construct model filename
-    let model_filename = if model_name.starts_with("ggml-") {
-        model_name.to_string()
-    } else {
-        format!("ggml-{}.bin", model_name)
-    };
-
-    Ok(models_dir.join(model_filename))
+    super::models::model_path(model_name)
 }
 
 /// Run whisper transcription
@@ -140,37 +126,13 @@ fn create_whisper_not_found_error() -> anyhow::Error {
 }
 
 fn create_model_not_found_error(model_name: &str) -> anyhow::Error {
-    let proj_dirs =
-        ProjectDirs::from("", "", "captains-log").expect("Failed to get project directories");
-    let models_dir = proj_dirs.data_dir().join("models");
-
-    let model_filename = if model_name.starts_with("ggml-") {
-        model_name.to_string()
-    } else {
-        format!("ggml-{}.bin", model_name)
-    };
-
     let msg = format!("{}", "Error: Whisper model not found".red().bold());
     let help = format!(
-        "Model '{}' not found at: {}\n\n\
+        "Model '{model_name}' is not installed.\n\n\
         {}:\n  \
-        # Download the model from whisper.cpp repository\n  \
-        cd {}\n  \
-        curl -L -o {} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}\n\n\
-        {}:\n  \
-        tiny.en (~75MB) - Fastest, least accurate\n  \
-        base.en (~140MB) - Good balance (recommended)\n  \
-        small.en (~460MB) - Better accuracy\n  \
-        medium.en (~1.5GB) - High accuracy\n\n\
-        For more models: {}",
-        model_name,
-        models_dir.join(&model_filename).display(),
-        "Download instructions".green(),
-        models_dir.display(),
-        model_filename,
-        model_filename,
-        "Available models".green(),
-        "https://huggingface.co/ggerganov/whisper.cpp".blue()
+        cl models install {model_name}\n\n\
+        See what is available with: cl models list",
+        "Install it".green(),
     );
 
     anyhow::anyhow!("{}\n{}", msg, help)

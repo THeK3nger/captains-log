@@ -1,3 +1,4 @@
+pub mod models;
 mod platform;
 mod playback;
 mod recording;

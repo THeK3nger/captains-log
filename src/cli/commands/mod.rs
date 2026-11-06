@@ -4,5 +4,6 @@ pub mod edit;
 pub mod import_export;
 pub mod journals;
 pub mod list;
+pub mod models;
 pub mod stats;
 pub mod tags;

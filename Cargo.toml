@@ -24,6 +24,7 @@ shlex = "2.0.1"
 maud = "0.27.0"
 serde_yaml_ng = "0.10.0"
 ctrlc = "3.5.2"
+ureq = "3.5.1"
 
 [[bin]]
 name = "cl"
