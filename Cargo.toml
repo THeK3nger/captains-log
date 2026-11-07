@@ -29,3 +29,8 @@ ureq = "3.5.1"
 [[bin]]
 name = "cl"
 path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
