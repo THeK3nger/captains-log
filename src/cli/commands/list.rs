@@ -1,8 +1,10 @@
 use crate::cli::dateparser::parse_entry_filters;
+use crate::cli::display::{
+    SUMMARY_DATE_FORMAT, content_preview, entry_date, format_tags, split_matches, stardate_parts,
+};
 use crate::cli::formatting::{get_wrap_width, wrap_text};
-use crate::cli::stardate::Stardate;
 use crate::config::{Config, DEFAULT_LIST_LIMIT};
-use crate::journal::{Entry, Journal, SortOrder, truncate_with_ellipsis};
+use crate::journal::{Entry, Journal, SortOrder};
 use crate::time::{days_in_month, to_local};
 use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate, Utc};
@@ -232,17 +234,6 @@ pub fn search_entries(journal: &Journal, config: &Config, args: SearchArgs) -> R
     Ok(())
 }
 
-/// Format a timestamp with a user-supplied strftime pattern, falling back to the
-/// default pattern if it is invalid (chrono's `to_string` would panic on it).
-fn format_date(date: &chrono::DateTime<chrono::FixedOffset>, pattern: &str) -> String {
-    use std::fmt::Write;
-    let mut out = String::new();
-    if write!(out, "{}", date.format(pattern)).is_err() {
-        out = date.format("%Y-%m-%d %H:%M:%S").to_string();
-    }
-    out
-}
-
 pub fn print_entry(entry: &Entry, config: &Config) {
     let stardate_mode = config.display.stardate_mode;
     let timezone = config.get_timezone();
@@ -254,20 +245,12 @@ pub fn print_entry(entry: &Entry, config: &Config) {
         entry.id.to_string().white().bold()
     );
     if stardate_mode {
-        let stardate = entry.timestamp.to_stardate();
-
-        let stardate_string = format_stardate(stardate);
-
-        println!("{}: {}", "Stardate".cyan().bold(), stardate_string);
+        println!("{}: {}", "Stardate".cyan().bold(), format_stardate(entry));
     } else {
         println!(
             "{}: {}",
             "Date".cyan().bold(),
-            format_date(
-                &to_local(&entry.timestamp, timezone),
-                &config.display.date_format
-            )
-            .white()
+            entry_date(entry, timezone, &config.display.date_format).white()
         );
     }
     println!(
@@ -302,86 +285,18 @@ pub fn print_entry(entry: &Entry, config: &Config) {
     println!("{}", "─".repeat(width as usize).bright_blue());
 }
 
-const PREVIEW_CHARS: usize = 40;
-
-/// Case-insensitive fold that keeps one char per char, so indices stay aligned with the input.
-fn fold_char(c: char) -> char {
-    let mut lower = c.to_lowercase();
-    match (lower.next(), lower.next()) {
-        (Some(single), None) => single,
-        _ => c,
-    }
-}
-
-/// Char ranges `[start, end)` of non-overlapping case-insensitive matches of `query`.
-fn match_ranges(chars: &[char], query: &str) -> Vec<(usize, usize)> {
-    let needle: Vec<char> = query.chars().map(fold_char).collect();
-    if needle.is_empty() {
-        return Vec::new();
-    }
-    let haystack: Vec<char> = chars.iter().copied().map(fold_char).collect();
-
-    let mut ranges = Vec::new();
-    let mut i = 0;
-    while i + needle.len() <= haystack.len() {
-        if haystack[i..].starts_with(&needle) {
-            ranges.push((i, i + needle.len()));
-            i += needle.len();
-        } else {
-            i += 1;
-        }
-    }
-    ranges
-}
-
 /// `text` with every match of `query` highlighted and the rest styled by `base`.
 fn highlight_matches(text: &str, query: &str, base: impl Fn(&str) -> ColoredString) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = String::new();
-    let mut cursor = 0;
-    for (start, end) in match_ranges(&chars, query) {
-        if start > cursor {
-            out.push_str(&base(&chars[cursor..start].iter().collect::<String>()).to_string());
-        }
-        out.push_str(
-            &chars[start..end]
-                .iter()
-                .collect::<String>()
-                .black()
-                .on_yellow()
-                .bold()
-                .to_string(),
-        );
-        cursor = end;
-    }
-    if cursor < chars.len() {
-        out.push_str(&base(&chars[cursor..].iter().collect::<String>()).to_string());
-    }
-    out
-}
-
-/// One-line preview of `content`; with a query, the window moves so the first match is visible.
-fn content_preview(content: &str, query: Option<&str>) -> String {
-    let flat = content.replace('\n', " ");
-    let Some(first) = query.and_then(|q| {
-        let chars: Vec<char> = flat.chars().collect();
-        match_ranges(&chars, q)
-            .first()
-            .map(|&(start, end)| (start, end))
-    }) else {
-        return truncate_with_ellipsis(&flat, PREVIEW_CHARS);
-    };
-    if first.1 <= PREVIEW_CHARS {
-        return truncate_with_ellipsis(&flat, PREVIEW_CHARS);
-    }
-
-    let chars: Vec<char> = flat.chars().collect();
-    let start = first.0.saturating_sub(10);
-    let end = (start + PREVIEW_CHARS.max(first.1 - first.0 + 10)).min(chars.len());
-    let window: String = chars[start..end].iter().collect();
-    let suffix = if end < chars.len() { "..." } else { "" };
-    let prefix = if start > 0 { "..." } else { "" };
-    format!("{prefix}{}{suffix}", window.trim())
+    split_matches(text, query)
+        .into_iter()
+        .map(|(segment, is_match)| {
+            if is_match {
+                segment.black().on_yellow().bold().to_string()
+            } else {
+                base(&segment).to_string()
+            }
+        })
+        .collect()
 }
 
 fn format_entry_summary(
@@ -399,12 +314,9 @@ fn format_entry_summary(
     let id = format!("[{}]", entry.id).bright_blue().bold();
 
     let date = if stardate_mode {
-        let stardate = entry.timestamp.to_stardate();
-        format_stardate(stardate)
+        format_stardate(entry)
     } else {
-        to_local(&entry.timestamp, timezone)
-            .format("%Y-%m-%d %H:%M")
-            .to_string()
+        entry_date(entry, timezone, SUMMARY_DATE_FORMAT)
             .white()
             .to_string()
     };
@@ -446,27 +358,9 @@ fn format_entry_summary(
     }
 }
 
-/// `#a #b #c`
-pub fn format_tags(tags: &[String]) -> String {
-    tags.iter()
-        .map(|tag| format!("#{tag}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn format_stardate(stardate: f64) -> String {
-    let stardate_string = format!("{:.5}", stardate);
-
-    // Split into head and last two characters safely
-    let chars: Vec<char> = stardate_string.chars().collect();
-    let (head, tail) = if chars.len() >= 2 {
-        let head: String = chars[..chars.len() - 2].iter().collect();
-        let tail: String = chars[chars.len() - 2..].iter().collect();
-        (head, tail)
-    } else {
-        (stardate_string, String::new())
-    };
-
+/// A stardate with the last two digits dimmed.
+fn format_stardate(entry: &Entry) -> String {
+    let (head, tail) = stardate_parts(entry);
     format!("{}{}", head.white(), tail.bright_black())
 }
 

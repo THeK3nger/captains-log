@@ -1,15 +1,14 @@
-use super::list::{format_tags, print_entry};
+use super::list::print_entry;
 use crate::audio::{get_audio_directory, get_audio_full_path};
 use crate::cli::dateparser::parse_tags;
-use crate::cli::frontmatter::{format_entry_with_frontmatter, parse_frontmatter};
+use crate::cli::display::format_tags;
+use crate::cli::editor::{compose_new_entry, edit_entry_in_editor};
 use crate::config::Config;
 use crate::journal::{Journal, NewEntry};
 use anyhow::{Context, Result};
 use colored::*;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
 
 /// `cl new`: create an entry from inline content, or open the editor if there is none.
 pub fn create_entry(
@@ -58,7 +57,8 @@ fn confirm(prompt: ColoredString) -> Result<bool> {
 
 /// Resolve an entry's audio file, refusing anything outside the audio directory
 /// (the path comes from the database, so don't trust it blindly).
-fn audio_file_to_remove(db_path: &Path, relative_path: &str) -> Result<Option<PathBuf>> {
+/// `None` if the file doesn't exist.
+pub fn audio_file_to_remove(db_path: &Path, relative_path: &str) -> Result<Option<PathBuf>> {
     let full_path = get_audio_full_path(db_path, relative_path)?;
     if !full_path.exists() {
         return Ok(None);
@@ -174,158 +174,32 @@ pub fn move_entry(journal: &Journal, id: i64, target_journal: &str) -> Result<()
     Ok(())
 }
 
-/// Run the configured editor (which may include arguments, e.g. "code --wait") on `file`.
-fn run_editor(config: &Config, file: &Path) -> Result<ExitStatus> {
-    let editor = config.get_editor_command();
-    let mut parts = shlex::split(&editor)
-        .filter(|parts| !parts.is_empty())
-        .with_context(|| format!("Invalid editor command: {editor:?}"))?
-        .into_iter();
-    let program = parts.next().expect("checked non-empty");
-
-    Command::new(&program)
-        .args(parts)
-        .arg(file)
-        .status()
-        .with_context(|| format!("Failed to launch editor {editor:?}"))
-}
-
-fn parse_entry_body(body: &str) -> (Option<String>, String) {
-    let trimmed_body = body.trim();
-    if trimmed_body.is_empty() {
-        return (None, String::new());
-    }
-
-    let mut lines = body.lines();
-    let Some(first_line) = lines.next() else {
-        return (None, String::new());
-    };
-    let first_line = first_line.trim();
-
-    if let Some(title) = first_line.strip_prefix("# ") {
-        let content = lines.collect::<Vec<_>>().join("\n").trim().to_string();
-        let title = title.trim();
-        let title = (!title.is_empty()).then(|| title.to_string());
-        (title, content)
-    } else {
-        (None, trimmed_body.to_string())
-    }
-}
-
+/// `cl new` without content: write the entry in the editor.
 fn new_entry(
     journal: &Journal,
     journal_category: Option<&str>,
     tags: &[String],
     config: &Config,
 ) -> Result<()> {
-    // Create a temporary file for the new entry
-    let temp_dir = env::temp_dir();
-    let temp_file = temp_dir.join("captains-log-new.md");
-
-    // Write template content to temp file
-    let template_content = "# \n\n";
-    fs::write(&temp_file, template_content)?;
-
-    let status = run_editor(config, &temp_file)?;
-
-    if !status.success() {
-        return Err(anyhow::anyhow!("Editor exited with error"));
-    }
-
-    // Read the edited content
-    let edited_content = fs::read_to_string(&temp_file)?;
-    let (title, content) = parse_entry_body(&edited_content);
-
-    // Check if the content is empty
-    if content.is_empty() && title.is_none() {
-        println!(
+    match compose_new_entry(journal, config, journal_category, tags)? {
+        Some(id) => {
+            println!("{}", format!("Entry {} created successfully", id).green());
+            print_entry_tags(journal, id)?;
+        }
+        None => println!(
             "{}",
             "Entry creation cancelled - no content provided".yellow()
-        );
-        // Clean up temp file
-        let _ = fs::remove_file(&temp_file);
-        return Ok(());
+        ),
     }
-
-    // Create the entry
-    let id = journal.create_entry(
-        NewEntry::new(&content)
-            .title(title.as_deref())
-            .journal(journal_category)
-            .tags(tags),
-    )?;
-    println!("{}", format!("Entry {} created successfully", id).green());
-    print_entry_tags(journal, id)?;
-
-    // Clean up temp file
-    let _ = fs::remove_file(&temp_file);
-
     Ok(())
 }
 
 pub fn edit_entry(journal: &Journal, id: i64, config: &Config) -> Result<()> {
-    // Get the existing entry
-    let entry = journal.get_entry(id)?.context("Entry not found")?;
-
-    // Create a temporary file with the current content
-    let temp_dir = env::temp_dir();
-    let temp_file = temp_dir.join(format!("captains-log-edit-{}.md", id));
-
-    // Format content with title if present
-    let body_content = if let Some(title) = &entry.title {
-        format!("# {}\n\n{}", title, entry.content)
-    } else {
-        entry.content.clone()
-    };
-
-    // Write current content with YAML frontmatter to temp file. Tags written
-    // as #tag in the text are not repeated in the frontmatter.
-    let content_with_frontmatter = format_entry_with_frontmatter(
-        &entry.journal,
-        entry.timestamp,
-        &entry.extra_tags(),
-        &body_content,
-    )?;
-    fs::write(&temp_file, content_with_frontmatter)?;
-
-    let status = run_editor(config, &temp_file)?;
-
-    if !status.success() {
-        return Err(anyhow::anyhow!("Editor exited with error"));
-    }
-
-    // Read the edited content
-    let edited_content = fs::read_to_string(&temp_file)?;
-
-    // Parse frontmatter and content
-    let (metadata, body) = parse_frontmatter(&edited_content).context(
-        "Failed to parse entry. Make sure the YAML frontmatter is properly formatted with '---' delimiters",
-    )?;
-    let (title, content) = parse_entry_body(&body);
-    let extra_tags = parse_tags(&metadata.tags).with_context(|| {
-        format!(
-            "Invalid tags in the frontmatter (your edits are kept in {})",
-            temp_file.display()
-        )
-    })?;
-
-    // Update the entry with metadata
-    if journal.update_entry_with_metadata(
-        id,
-        title.as_deref(),
-        &content,
-        &metadata.journal,
-        metadata.timestamp,
-        &extra_tags,
-    )? {
+    if edit_entry_in_editor(journal, config, id)? {
         println!("{}", format!("Entry {} updated successfully", id).green());
         print_entry_tags(journal, id)?;
     } else {
         println!("{}", format!("Failed to update entry {}", id).red());
     }
-
-    // Clean up temp file
-    let _ = fs::remove_file(&temp_file);
-
     Ok(())
 }

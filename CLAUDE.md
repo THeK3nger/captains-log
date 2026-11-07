@@ -186,6 +186,8 @@ src/
 ├── cli/
 │   ├── mod.rs           # Command handling and help text
 │   ├── dateparser.rs    # Date parsing utilities
+│   ├── display.rs       # Uncolored entry display helpers (dates, stardates, previews, match ranges)
+│   ├── editor.rs        # $EDITOR round-trip for new/edit, returns results instead of printing
 │   ├── formatting.rs    # Markdown rendering utilities
 │   ├── frontmatter.rs   # YAML frontmatter parsing and formatting
 │   ├── stardate.rs      # Stardate conversion system

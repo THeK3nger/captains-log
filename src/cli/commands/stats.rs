@@ -1,6 +1,6 @@
 use crate::cli::dateparser::parse_entry_filters;
 use crate::config::Config;
-use crate::journal::{Entry, Journal, SortOrder};
+use crate::journal::{Entry, EntryFilters, Journal, SortOrder};
 use crate::time::{local_date, today};
 use anyhow::Result;
 use chrono::{Datelike, Days, NaiveDate, Weekday};
@@ -25,17 +25,21 @@ pub struct StatsArgs {
     pub journal: Option<String>,
 }
 
+/// Journal statistics, computed without printing so any front end can show them.
 #[derive(Debug, PartialEq)]
-struct Stats {
-    total: usize,
-    per_journal: Vec<(String, usize)>,
-    current_streak: usize,
-    longest_streak: usize,
-    last_7_days: usize,
-    last_30_days: usize,
-    avg_words: usize,
-    top_tags: Vec<(String, usize)>,
-    busiest_weekday: Option<(Weekday, usize)>,
+pub struct Stats {
+    pub total: usize,
+    /// (journal, entries), most entries first.
+    pub per_journal: Vec<(String, usize)>,
+    /// Consecutive days with entries ending today or yesterday.
+    pub current_streak: usize,
+    pub longest_streak: usize,
+    pub last_7_days: usize,
+    pub last_30_days: usize,
+    pub avg_words: usize,
+    /// The `TOP_TAGS` most used tags, (tag, entries).
+    pub top_tags: Vec<(String, usize)>,
+    pub busiest_weekday: Option<(Weekday, usize)>,
 }
 
 /// Sort by count descending, then name, so output is stable.
@@ -72,7 +76,8 @@ fn streaks(days: &BTreeSet<NaiveDate>, today: NaiveDate) -> (usize, usize) {
     (current, longest)
 }
 
-fn compute(entries: &[Entry], today: NaiveDate, tz: Option<chrono_tz::Tz>) -> Stats {
+/// Statistics over `entries`; `today` decides which streak is current.
+pub fn compute(entries: &[Entry], today: NaiveDate, tz: Option<chrono_tz::Tz>) -> Stats {
     let mut journals: HashMap<String, usize> = HashMap::new();
     let mut tags: HashMap<String, usize> = HashMap::new();
     let mut weekdays: HashMap<Weekday, usize> = HashMap::new();
@@ -118,6 +123,20 @@ fn plural(n: usize, unit: &str) -> String {
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }
 
+/// Load the entries matching `filters` and compute their statistics.
+/// `None` if no entry matches.
+pub fn load_stats(
+    journal: &Journal,
+    filters: &EntryFilters,
+    tz: Option<chrono_tz::Tz>,
+) -> Result<Option<Stats>> {
+    let entries = journal.list_entries_filtered_with_order(filters, SortOrder::OldestFirst)?;
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(compute(&entries, today(tz), tz)))
+}
+
 pub fn show_stats(journal: &Journal, config: &Config, args: StatsArgs) -> Result<()> {
     let tz = config.get_timezone();
     let filters = parse_entry_filters(
@@ -128,13 +147,10 @@ pub fn show_stats(journal: &Journal, config: &Config, args: StatsArgs) -> Result
         &[],
         tz,
     )?;
-    let entries = journal.list_entries_filtered_with_order(&filters, SortOrder::OldestFirst)?;
-    if entries.is_empty() {
+    let Some(stats) = load_stats(journal, &filters, tz)? else {
         println!("{}", "No entries found".yellow());
         return Ok(());
-    }
-
-    let stats = compute(&entries, today(tz), tz);
+    };
     let label = |text: &str| format!("{:<16}", text).bold();
 
     println!("{}", "Captain's Log statistics".cyan().bold());

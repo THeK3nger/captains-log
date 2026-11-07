@@ -1,5 +1,7 @@
 pub mod commands;
 pub mod dateparser;
+pub mod display;
+pub mod editor;
 pub mod formatting;
 pub mod frontmatter;
 pub mod stardate;
