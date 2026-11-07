@@ -359,15 +359,7 @@ impl Journal {
     /// narrowed by `filters`, newest first.
     pub fn search_entries(&self, query: &str, filters: &EntryFilters) -> Result<Vec<Entry>> {
         let query = query.to_lowercase();
-        let mut entries = self.list_entries_filtered(filters)?;
-        entries.retain(|entry| {
-            entry.content.to_lowercase().contains(&query)
-                || entry
-                    .title
-                    .as_deref()
-                    .is_some_and(|title| title.to_lowercase().contains(&query))
-        });
-        Ok(entries)
+        self.query_filtered(filters, Some(&query), SortOrder::NewestFirst, None)
     }
 
     pub fn delete_entry(&self, id: i64) -> Result<bool> {
@@ -461,7 +453,18 @@ impl Journal {
         order: SortOrder,
         limit: Option<usize>,
     ) -> Result<Vec<Entry>> {
-        let (where_clause, mut params) = self.where_clause(filters)?;
+        self.query_filtered(filters, None, order, limit)
+    }
+
+    /// `search` is a lowercased literal that must appear in the title or content.
+    fn query_filtered(
+        &self,
+        filters: &EntryFilters,
+        search: Option<&str>,
+        order: SortOrder,
+        limit: Option<usize>,
+    ) -> Result<Vec<Entry>> {
+        let (where_clause, mut params) = self.where_clause(filters, search)?;
         let mut query = format!(
             "{ENTRY_SELECT}{where_clause} ORDER BY entries.timestamp {}",
             order.as_sql()
@@ -476,7 +479,7 @@ impl Journal {
 
     /// Number of entries matching `filters`.
     pub fn count_entries(&self, filters: &EntryFilters) -> Result<usize> {
-        let (where_clause, params) = self.where_clause(filters)?;
+        let (where_clause, params) = self.where_clause(filters, None)?;
         let count: i64 = self.db.connection().query_row(
             &format!("SELECT COUNT(*){ENTRY_FROM}{where_clause}"),
             rusqlite::params_from_iter(params),
@@ -489,6 +492,7 @@ impl Journal {
     fn where_clause(
         &self,
         filters: &EntryFilters,
+        search: Option<&str>,
     ) -> Result<(String, Vec<Box<dyn rusqlite::ToSql>>)> {
         let (start, end) = filters.timestamp_bounds(self.timezone)?;
         let mut conditions = Vec::new();
@@ -513,6 +517,12 @@ impl Journal {
                          WHERE et.entry_id = entries.id AND t.name = ?)",
             );
             params.push(Box::new(tag.clone()));
+        }
+
+        if let Some(search) = search {
+            conditions.push("(contains_ci(entries.content, ?) OR contains_ci(entries.title, ?))");
+            params.push(Box::new(search.to_string()));
+            params.push(Box::new(search.to_string()));
         }
 
         let where_clause = if conditions.is_empty() {
@@ -730,6 +740,28 @@ mod tests {
             tags: tags.iter().map(|tag| tag.to_string()).collect(),
             ..EntryFilters::default()
         }
+    }
+
+    #[test]
+    fn search_is_literal_case_insensitive_and_unicode_aware() {
+        let j = journal();
+        j.create_entry(NewEntry::new("Caffè con ZUCCHERO")).unwrap();
+        j.create_entry(NewEntry::new("body").title(Some("Titolo CAFFÈ")))
+            .unwrap();
+        j.create_entry(NewEntry::new("100% sure #a #b")).unwrap();
+        j.create_entry(NewEntry::new("nothing")).unwrap();
+        let all = EntryFilters::default();
+
+        assert_eq!(j.search_entries("caffè", &all).unwrap().len(), 2);
+        assert_eq!(j.search_entries("ZUCCHERO", &all).unwrap().len(), 1);
+        // LIKE wildcards are plain characters
+        assert_eq!(j.search_entries("100%", &all).unwrap().len(), 1);
+        assert_eq!(j.search_entries("%", &all).unwrap().len(), 1);
+        assert_eq!(j.search_entries("_", &all).unwrap().len(), 0);
+        // combined with other filters
+        let tagged = tag_filter(&["a", "b"]);
+        assert_eq!(j.search_entries("sure", &tagged).unwrap().len(), 1);
+        assert_eq!(j.search_entries("caffè", &tagged).unwrap().len(), 0);
     }
 
     #[test]

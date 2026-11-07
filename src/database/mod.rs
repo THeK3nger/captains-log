@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use rusqlite::functions::FunctionFlags;
 use std::fs;
 
 /// Schema migrations, applied in order. The index of a migration plus one is
@@ -125,6 +126,27 @@ fn apply_migrations(conn: &mut Connection, current: u32) -> Result<()> {
     Ok(())
 }
 
+/// SQL helpers used by queries.
+///
+/// `contains_ci(text, needle)`: literal, case-insensitive substring test with
+/// full Unicode case folding (SQLite's own `LIKE` only folds ASCII). `needle`
+/// must already be lowercased. NULL text never matches.
+fn register_functions(conn: &Connection) -> Result<()> {
+    conn.create_scalar_function(
+        "contains_ci",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let Some(text) = ctx.get::<Option<String>>(0)? else {
+                return Ok(false);
+            };
+            let needle = ctx.get::<String>(1)?;
+            Ok(text.to_lowercase().contains(&needle))
+        },
+    )
+    .context("Failed to register SQL functions")
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -142,6 +164,8 @@ impl Database {
             .with_context(|| format!("Failed to open database at {:?}", db_path))?;
         // Off by default in SQLite; needed for ON DELETE CASCADE on entry_tags.
         conn.pragma_update(None, "foreign_keys", true)?;
+
+        register_functions(&conn)?;
 
         let mut db = Database { conn };
         db.run_migrations()?;
