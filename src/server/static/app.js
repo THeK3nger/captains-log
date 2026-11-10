@@ -135,6 +135,25 @@
     restoreDraft();
   });
 
+  // Enter in the journal field with a half-typed name completes it with the
+  // first suggestion instead of submitting (browsers only do that when the
+  // suggestion was highlighted). An exact match, or a name matching nothing
+  // (a new journal), submits as usual.
+  document.addEventListener('keydown', function (event) {
+    var input = event.target;
+    if (event.key !== 'Enter' || event.isComposing || !input.matches || !input.matches('#entry-journal')) return;
+    var typed = input.value.trim().toLowerCase();
+    if (!typed) return;
+    var names = Array.from(input.list ? input.list.options : []).map(function (o) { return o.value; });
+    if (names.some(function (n) { return n.toLowerCase() === typed; })) return;
+    var match = names.find(function (n) { return n.toLowerCase().startsWith(typed); }) ||
+      names.find(function (n) { return n.toLowerCase().includes(typed); });
+    if (!match) return;
+    event.preventDefault();
+    input.value = match;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
   document.addEventListener('keydown', function (event) {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     var target = event.target;
