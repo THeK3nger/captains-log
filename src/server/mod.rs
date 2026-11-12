@@ -258,6 +258,7 @@ pub fn run(db_path: &std::path::Path, port: u16, open_browser: bool) -> Result<(
             .route("/entry/{id}", get(entry_handler))
             .route("/form/new", get(new_form_handler))
             .route("/entries", post(create_handler))
+            .route("/preview", post(preview_handler))
             .route(
                 "/entry/{id}/edit",
                 get(edit_form_handler).post(update_handler),
@@ -381,6 +382,17 @@ fn save_redirect(
         String::new(),
     )
         .into_response()
+}
+
+#[derive(Deserialize)]
+struct PreviewForm {
+    #[serde(default)]
+    content: String,
+}
+
+/// Renders the entry form's Markdown exactly as the saved entry will show it.
+async fn preview_handler(Form(form): Form<PreviewForm>) -> Html<String> {
+    Html(templates::markdown_preview(&form.content).into_string())
 }
 
 async fn placeholder_handler() -> Html<String> {
@@ -701,6 +713,25 @@ mod tests {
         .await;
         assert_eq!(result.headers()["hx-redirect"], "/entry/1?journal=Personal");
         assert_eq!(result.headers()["hx-trigger"], "entry-saved");
+    }
+
+    #[tokio::test]
+    async fn preview_renders_markdown_like_the_entry_view() {
+        let html = preview_handler(Form(PreviewForm {
+            content: "**bold** _it_ ~~gone~~ [a](https://x.y)".into(),
+        }))
+        .await
+        .0;
+        assert!(html.contains("<strong>bold</strong>"));
+        assert!(html.contains("<em>it</em>"));
+        assert!(html.contains("<del>gone</del>"));
+        assert!(html.contains(r#"<a href="https://x.y">a</a>"#));
+        let empty = preview_handler(Form(PreviewForm {
+            content: "  ".into(),
+        }))
+        .await
+        .0;
+        assert!(empty.contains("Nothing to preview."));
     }
 
     #[tokio::test]

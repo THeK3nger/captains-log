@@ -182,6 +182,42 @@ pub fn entry_detail(entry: &Entry, filter: &ListQuery) -> Markup {
     }
 }
 
+/// Formatting buttons for the content field; `app.js` gives them (and their
+/// keyboard shortcuts) their behavior. `md-*` actions edit the textarea.
+fn markdown_toolbar() -> Markup {
+    // (action, label, accessible name with shortcut)
+    const BUTTONS: [(&str, &str, &str); 9] = [
+        ("bold", "B", "Bold (⌘/Ctrl+B)"),
+        ("italic", "I", "Italic (⌘/Ctrl+I)"),
+        ("strike", "S", "Strikethrough (⌘/Ctrl+Shift+X)"),
+        ("heading", "H", "Heading (⌘/Ctrl+Shift+H)"),
+        ("link", "LINK", "Link (⌘/Ctrl+K)"),
+        ("code", "CODE", "Code (⌘/Ctrl+E)"),
+        ("bullets", "• LIST", "Bulleted list (⌘/Ctrl+Shift+8)"),
+        ("numbers", "1. LIST", "Numbered list (⌘/Ctrl+Shift+7)"),
+        ("quote", "QUOTE", "Quote (⌘/Ctrl+Shift+.)"),
+    ];
+    html! {
+        div.md-toolbar role="toolbar" aria-label="Formatting" aria-controls="entry-content" {
+            @for (action, label, name) in BUTTONS {
+                button.md-btn type="button" data-md=(action) title=(name) aria-label=(name) { (label) }
+            }
+            span.md-spacer {}
+            button.md-btn.md-preview-toggle type="button" data-md="preview" aria-pressed="false"
+                title="Toggle preview (⌘/Ctrl+Shift+P)" { "PREVIEW" }
+        }
+    }
+}
+
+/// The Markdown preview shown in the entry form, rendered like a saved entry.
+pub fn markdown_preview(content: &str) -> Markup {
+    if content.trim().is_empty() {
+        html! { p.md-preview-empty { "Nothing to preview." } }
+    } else {
+        PreEscaped(markdown_to_html(content))
+    }
+}
+
 /// What the user submitted, shown again together with `error` when a save
 /// fails, so the text they typed is never lost.
 pub struct FormDraft<'a> {
@@ -270,9 +306,11 @@ pub fn entry_form(
                             value=(timestamp);
                     }
                 }
-                div.form-field {
+                div.form-field.md-editor {
                     label.form-label for="entry-content" { "CONTENT" }
-                    textarea.form-textarea #entry-content name="content" placeholder="Begin recording..." { (content) }
+                    (markdown_toolbar())
+                    textarea.form-textarea #entry-content name="content" placeholder="Begin recording... (Markdown supported)" { (content) }
+                    div.ed-content.md-preview #entry-preview hidden aria-live="polite" {}
                 }
                 div.form-actions {
                     button.btn-save type="submit" { "SAVE ENTRY" }
@@ -408,7 +446,7 @@ pub fn page(
                                 @if let Some(name) = journal { " · " (name) }
                                 @if let Some(tag) = tag { " · #" (tag) }
                             }
-                            span.keyboard-help title="J/K: next/previous log · N: new entry · Esc: cancel editing" { "J/K · N · ESC" }
+                            span.keyboard-help title="J/K: next/previous log · N: new entry · Esc: cancel editing · ⌘/Ctrl+Enter: save · ⌘/Ctrl+B/I/K/E: bold, italic, link, code · ⌘/Ctrl+Shift+P: preview" { "J/K · N · ESC" }
                         }
                         div.bb-seg { "v" (env!("CARGO_PKG_VERSION")) }
                         div.bb-cap {}

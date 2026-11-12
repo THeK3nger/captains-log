@@ -154,6 +154,222 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
+  // ---- Markdown editor -------------------------------------------------
+  // Every edit goes through execCommand('insertText') so the browser's undo
+  // stack (Cmd+Z) keeps working and `input` fires for the draft autosave.
+
+  function replaceRange(ta, start, end, text, selStart, selEnd) {
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    var done = false;
+    try { done = document.execCommand('insertText', false, text); } catch (e) { /* unsupported */ }
+    if (!done || ta.value.slice(start, start + text.length) !== text) {
+      ta.setRangeText(text, start, end, 'end');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    ta.setSelectionRange(selStart, selEnd);
+  }
+
+  // Wraps the selection in `marker` (or removes it when already wrapped).
+  // Surrounding spaces stay outside: "**word **" would not render as bold.
+  function toggleWrap(ta, marker) {
+    var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd, m = marker.length;
+    while (s < e && /\s/.test(v[s])) s++;
+    while (e > s && /\s/.test(v[e - 1])) e--;
+    var sel = v.slice(s, e);
+    if (sel.length >= 2 * m && sel.startsWith(marker) && sel.endsWith(marker)) {
+      var inner = sel.slice(m, sel.length - m);
+      return replaceRange(ta, s, e, inner, s, s + inner.length);
+    }
+    if (v.slice(s - m, s) === marker && v.slice(e, e + m) === marker) {
+      return replaceRange(ta, s - m, e + m, sel, s - m, e - m);
+    }
+    replaceRange(ta, s, e, marker + sel + marker, s + m, e + m);
+  }
+
+  function insertCode(ta) {
+    var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+    var sel = v.slice(s, e);
+    if (sel.indexOf('\n') < 0) return toggleWrap(ta, '`');
+    var before = s > 0 && v[s - 1] !== '\n' ? '\n' : '';
+    var after = v[e] !== undefined && v[e] !== '\n' ? '\n' : '';
+    var text = before + '```\n' + sel.replace(/\n$/, '') + '\n```' + after;
+    var open = s + before.length + 3; // caret after ``` to type a language
+    replaceRange(ta, s, e, text, open, open);
+  }
+
+  function insertLink(ta) {
+    var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+    var sel = v.slice(s, e).trim();
+    var text;
+    if (/^(https?:\/\/|mailto:)\S+$/i.test(sel)) {
+      text = '[link text](' + sel + ')';
+      return replaceRange(ta, s, e, text, s + 1, s + 10);
+    }
+    var label = sel || 'link text';
+    text = '[' + label + '](url)';
+    var url = s + label.length + 3;
+    replaceRange(ta, s, e, text, sel ? url : s + 1, sel ? url + 3 : s + 1 + label.length);
+  }
+
+  var LINE_PREFIX = {
+    bullets: { re: /^(\s*)[-*+] (\[[ xX]\] )?/, make: function () { return '- '; } },
+    numbers: { re: /^(\s*)\d+[.)] /, make: function (i) { return (i + 1) + '. '; } },
+    quote: { re: /^(\s*)> ?/, make: function () { return '> '; } },
+    heading: { re: /^(\s*)#{1,6} /, make: function () { return '## '; } }
+  };
+
+  // Adds a prefix to every selected line, or removes it when all have one.
+  function toggleLines(ta, kind) {
+    var rule = LINE_PREFIX[kind];
+    var v = ta.value;
+    var start = v.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+    var endAt = ta.selectionEnd > ta.selectionStart && v[ta.selectionEnd - 1] === '\n'
+      ? ta.selectionEnd - 1 : ta.selectionEnd;
+    var end = v.indexOf('\n', endAt);
+    if (end < 0) end = v.length;
+    var lines = v.slice(start, end).split('\n');
+    var filled = lines.filter(function (l) { return l.trim(); });
+    var remove = filled.length > 0 && filled.every(function (l) { return rule.re.test(l); });
+    var n = 0;
+    var out = lines.map(function (line) {
+      if (remove) return line.replace(rule.re, '$1');
+      if (!line.trim() && lines.length > 1) return line;
+      var bare = line;
+      Object.keys(LINE_PREFIX).forEach(function (k) { bare = bare.replace(LINE_PREFIX[k].re, '$1'); });
+      var indent = bare.match(/^\s*/)[0];
+      return indent + rule.make(n++) + bare.slice(indent.length);
+    }).join('\n');
+    var caret = lines.length === 1 ? start + out.length : null;
+    replaceRange(ta, start, end, out, caret === null ? start : caret, caret === null ? start + out.length : caret);
+  }
+
+  // Enter inside a list or quote starts the next item; Enter on an empty
+  // item ends the list instead.
+  function continueList(ta) {
+    var v = ta.value, s = ta.selectionStart;
+    if (s !== ta.selectionEnd) return false;
+    var lineStart = v.lastIndexOf('\n', s - 1) + 1;
+    var line = v.slice(lineStart, s);
+    var m = line.match(/^(\s*)(?:([-*+]) (\[[ xX]\] )?|(\d+)([.)]) |(>) ?)/);
+    if (!m) return false;
+    if (!line.slice(m[0].length).trim() && v.slice(s, v.indexOf('\n', s) < 0 ? v.length : v.indexOf('\n', s)).trim() === '') {
+      replaceRange(ta, lineStart, s, m[1], lineStart + m[1].length, lineStart + m[1].length);
+      return true;
+    }
+    var next = m[2] ? m[2] + ' ' + (m[3] ? '[ ] ' : '')
+      : m[4] ? (parseInt(m[4], 10) + 1) + m[5] + ' '
+      : '> ';
+    var text = '\n' + m[1] + next;
+    replaceRange(ta, s, s, text, s + text.length, s + text.length);
+    return true;
+  }
+
+  function editorParts(from) {
+    var field = from.closest('.md-editor');
+    return field && {
+      field: field,
+      textarea: field.querySelector('textarea'),
+      preview: field.querySelector('.md-preview'),
+      toggle: field.querySelector('.md-preview-toggle')
+    };
+  }
+
+  function setPreview(parts, on) {
+    parts.toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    parts.toggle.textContent = on ? 'WRITE' : 'PREVIEW';
+    parts.field.classList.toggle('previewing', on);
+    parts.field.querySelectorAll('.md-btn:not(.md-preview-toggle)').forEach(function (b) { b.disabled = on; });
+    parts.textarea.hidden = on;
+    parts.preview.hidden = !on;
+    if (!on) { parts.textarea.focus(); return; }
+    parts.preview.innerHTML = '<p class="md-preview-empty">Rendering…</p>';
+    var request = (parts.field.previewRequest || 0) + 1;
+    parts.field.previewRequest = request;
+    fetch('/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ content: parts.textarea.value })
+    }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.text();
+    }).then(function (html) {
+      if (parts.field.previewRequest === request) parts.preview.innerHTML = html;
+    }).catch(function () {
+      if (parts.field.previewRequest === request) {
+        parts.preview.innerHTML = '<p class="md-preview-empty">Preview unavailable: the server did not answer.</p>';
+      }
+    });
+  }
+
+  function applyFormat(ta, action) {
+    switch (action) {
+      case 'bold': return toggleWrap(ta, '**');
+      case 'italic': return toggleWrap(ta, '_');
+      case 'strike': return toggleWrap(ta, '~~');
+      case 'code': return insertCode(ta);
+      case 'link': return insertLink(ta);
+      default: if (LINE_PREFIX[action]) toggleLines(ta, action);
+    }
+  }
+
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('.md-btn');
+    if (!button) return;
+    var parts = editorParts(button);
+    if (!parts) return;
+    if (button.dataset.md === 'preview') setPreview(parts, parts.textarea.hidden !== true);
+    else applyFormat(parts.textarea, button.dataset.md);
+  });
+
+  // Keep the textarea focused when a toolbar button is clicked, so the
+  // selection it acts on is not lost.
+  document.addEventListener('mousedown', function (event) {
+    var button = event.target.closest('.md-btn:not(.md-preview-toggle)');
+    if (button) event.preventDefault();
+  });
+
+  var SHIFT_SHORTCUTS = { Digit7: 'numbers', Digit8: 'bullets', Period: 'quote', KeyX: 'strike', KeyH: 'heading' };
+  var SHORTCUTS = { b: 'bold', i: 'italic', k: 'link', e: 'code' };
+
+  document.addEventListener('keydown', function (event) {
+    if (event.isComposing) return;
+    var parts = editorParts(event.target);
+    if (!parts) return;
+    var mod = event.metaKey || event.ctrlKey;
+    if (mod && !event.altKey && event.key === 'Enter') {
+      event.preventDefault();
+      var form = event.target.closest('form');
+      if (form && !form.querySelector('.btn-save').disabled) form.requestSubmit();
+      return;
+    }
+    if (mod && event.shiftKey && !event.altKey && event.code === 'KeyP') {
+      event.preventDefault();
+      setPreview(parts, parts.textarea.hidden !== true);
+      return;
+    }
+    if (event.target !== parts.textarea) return;
+    if (!mod && !event.altKey && !event.shiftKey && event.key === 'Enter') {
+      if (continueList(parts.textarea)) event.preventDefault();
+      return;
+    }
+    if (!mod || event.altKey) return;
+    var action = event.shiftKey ? SHIFT_SHORTCUTS[event.code] : SHORTCUTS[event.key.toLowerCase()];
+    if (!action) return;
+    event.preventDefault();
+    applyFormat(parts.textarea, action);
+  });
+
+  // ⌘/Ctrl+Enter also saves from the other form fields.
+  document.addEventListener('keydown', function (event) {
+    if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.key !== 'Enter') return;
+    if (editorParts(event.target)) return;
+    var form = event.target.closest && event.target.closest('#entry-detail .entry-form form');
+    if (!form) return;
+    event.preventDefault();
+    if (!form.querySelector('.btn-save').disabled) form.requestSubmit();
+  });
+
   document.addEventListener('keydown', function (event) {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     var target = event.target;
