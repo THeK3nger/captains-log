@@ -89,8 +89,7 @@ pub fn models_dir() -> Result<PathBuf> {
 /// Rejects anything that could escape the models directory or break the URL.
 pub fn normalize_name(name: &str) -> Result<String> {
     let name = name.trim();
-    let name = name.strip_prefix("ggml-").unwrap_or(name);
-    let name = name.strip_suffix(".bin").unwrap_or(name);
+    let name = name.trim_prefix("ggml-").trim_suffix(".bin");
     let valid = !name.is_empty()
         && name
             .chars()
