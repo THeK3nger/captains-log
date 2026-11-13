@@ -200,10 +200,10 @@ fn markdown_toolbar() -> Markup {
     html! {
         div.md-toolbar role="toolbar" aria-label="Formatting" aria-controls="entry-content" {
             @for (action, label, name) in BUTTONS {
-                button.md-btn type="button" data-md=(action) title=(name) aria-label=(name) { (label) }
+                button.md-btn type="button" tabindex="-1" data-md=(action) title=(name) aria-label=(name) { (label) }
             }
             span.md-spacer {}
-            button.md-btn.md-preview-toggle type="button" data-md="preview" aria-pressed="false"
+            button.md-btn.md-preview-toggle type="button" tabindex="-1" data-md="preview" aria-pressed="false"
                 title="Toggle preview (⌘/Ctrl+Shift+P)" { "PREVIEW" }
         }
     }
