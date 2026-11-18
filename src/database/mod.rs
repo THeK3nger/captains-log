@@ -2,6 +2,9 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use rusqlite::functions::FunctionFlags;
 use std::fs;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 /// Schema migrations, applied in order. The index of a migration plus one is
 /// the `PRAGMA user_version` the database has after it ran.
@@ -151,10 +154,43 @@ pub struct Database {
     conn: Connection,
 }
 
-impl Database {
-    pub fn new_with_path<P: AsRef<std::path::Path>>(db_path: P) -> Result<Self> {
-        let db_path = db_path.as_ref();
+/// How long opening the database may take before giving up. Local files open
+/// in milliseconds; a hang means the storage is not answering (typically a
+/// stuck cloud-sync folder such as Dropbox's File Provider).
+const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Run `work` on a helper thread and wait at most `timeout` for its result.
+///
+/// A call blocked in the kernel cannot be cancelled, so on timeout the thread
+/// is left behind; callers are expected to report the error and exit.
+fn run_with_timeout<T, F>(timeout: Duration, work: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        // The receiver is gone if we timed out; nothing to do then.
+        let _ = tx.send(work());
+    });
+    rx.recv_timeout(timeout).ok()
+}
+
+impl Database {
+    /// Open (and migrate) the database, failing with a clear message if the
+    /// storage does not respond within `OPEN_TIMEOUT`.
+    pub fn new_with_path<P: AsRef<std::path::Path>>(db_path: P) -> Result<Self> {
+        let path = db_path.as_ref().to_path_buf();
+        let worker_path = path.clone();
+        match run_with_timeout(OPEN_TIMEOUT, move || Self::open(&worker_path)) {
+            Some(result) => result,
+            None => anyhow::bail!(
+                "Cannot open the database at {path:?}: no response from storage (I/O timeout)"
+            ),
+        }
+    }
+
+    fn open(db_path: &std::path::Path) -> Result<Self> {
         // Create directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
@@ -185,6 +221,16 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_with_timeout_returns_result_or_none() {
+        assert_eq!(run_with_timeout(Duration::from_secs(5), || 42), Some(42));
+        let slow = run_with_timeout(Duration::from_millis(50), || {
+            thread::sleep(Duration::from_secs(2));
+            1
+        });
+        assert_eq!(slow, None);
+    }
 
     fn version(conn: &Connection) -> u32 {
         conn.pragma_query_value(None, "user_version", |row| row.get(0))
